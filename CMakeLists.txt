@@ -6,6 +6,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # nozzle submodule
+# MODULE (shared lib) requires all deps compiled with -fPIC
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(nozzle)
 
 # Find Python3 — prefer Blender's bundled Python if BLENDER_PYTHON_PATH is set
