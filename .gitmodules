@@ -1,0 +1,3 @@
+[submodule "nozzle"]
+	path = nozzle
+	url = git@github.com:nozzle-io/nozzle.git

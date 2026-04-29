@@ -1,0 +1,15 @@
+build/
+__pycache__/
+*.pyc
+*.pyd
+*.so
+*.dylib
+.DS_Store
+*.o
+*.obj
+.cmake/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+nozzle_blender/_nozzle_native*
