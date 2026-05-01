@@ -1,5 +1,8 @@
 # blender-nozzle
 
+> This codebase is currently in its AI-slob prototyping phase: the code runs on momentum, vibes, and plausible intent.
+> Proper debugging will be introduced once demand graduates from hypothetical to measurable.
+
 Blender addon for GPU texture sharing via [nozzle](https://github.com/nozzle-io/nozzle).
 
 Send Blender viewport renders or receive textures from other nozzle-compatible applications (openFrameworks, Max, etc.) in real-time.
@@ -76,3 +79,7 @@ The addon uses a two-layer approach:
 ## License
 
 MIT
+
+Third-party dependencies:
+
+- [nozzle](https://github.com/nozzle-io/nozzle) — MIT
