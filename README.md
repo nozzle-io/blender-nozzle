@@ -7,6 +7,14 @@ Blender addon for GPU texture sharing via [nozzle](https://github.com/nozzle-io/
 
 Send Blender viewport renders or receive textures from other nozzle-compatible applications (openFrameworks, Max, etc.) in real-time.
 
+## Disclaimer / Notice
+
+This library is currently a work in progress and contains many incomplete features and unverified implementations.
+Although it may appear usable at first glance, it may not function correctly.
+
+Please use it with the understanding that no guarantees are made regarding its behavior, and perform debugging, validation, and review as needed.
+If you encounter problems, please do not become angry; instead, contributions in the form of Issues or Pull Requests would be greatly appreciated.
+
 ## Status
 
 Early development. Functional sender (GL texture publish) and receiver (pixel copy to Blender image).
