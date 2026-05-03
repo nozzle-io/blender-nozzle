@@ -349,13 +349,13 @@ static PyObject *py_frame_lock_pixels(PyObject *self, PyObject *args) {
     }
 
     NozzleMappedPixels pixels = {0};
-    NozzleErrorCode err = nozzle_frame_lock_pixels(
-        g_handles.frames[frame_handle], &pixels);
+    NozzleErrorCode err = nozzle_frame_lock_pixels_with_origin(
+        g_handles.frames[frame_handle], NOZZLE_ORIGIN_TOP_LEFT, &pixels);
     if (err != NOZZLE_OK) {
         return check_error(err);
     }
 
-    Py_ssize_t total = (Py_ssize_t)pixels.row_bytes * pixels.height;
+    Py_ssize_t total = (Py_ssize_t)pixels.row_stride_bytes * pixels.height;
     PyObject *bytes = PyBytes_FromStringAndSize((const char *)pixels.data, total);
     if (!bytes) {
         nozzle_frame_unlock_pixels(g_handles.frames[frame_handle]);
@@ -369,7 +369,7 @@ static PyObject *py_frame_lock_pixels(PyObject *self, PyObject *args) {
         pixels.width,
         pixels.height,
         (int)pixels.format,
-        pixels.row_bytes);
+        pixels.row_stride_bytes);
 }
 
 static PyObject *py_frame_lock_writable_pixels(PyObject *self, PyObject *args) {
@@ -384,13 +384,13 @@ static PyObject *py_frame_lock_writable_pixels(PyObject *self, PyObject *args) {
     }
 
     NozzleMappedPixels pixels = {0};
-    NozzleErrorCode err = nozzle_frame_lock_writable_pixels(
-        g_handles.frames[frame_handle], &pixels);
+    NozzleErrorCode err = nozzle_frame_lock_writable_pixels_with_origin(
+        g_handles.frames[frame_handle], NOZZLE_ORIGIN_TOP_LEFT, &pixels);
     if (err != NOZZLE_OK) {
         return check_error(err);
     }
 
-    Py_ssize_t total = (Py_ssize_t)pixels.row_bytes * pixels.height;
+    Py_ssize_t total = (Py_ssize_t)pixels.row_stride_bytes * pixels.height;
     PyObject *bytes = PyBytes_FromStringAndSize((const char *)pixels.data, total);
     if (!bytes) {
         nozzle_frame_unlock_writable_pixels(g_handles.frames[frame_handle]);
@@ -404,7 +404,7 @@ static PyObject *py_frame_lock_writable_pixels(PyObject *self, PyObject *args) {
         pixels.width,
         pixels.height,
         (int)pixels.format,
-        pixels.row_bytes);
+        pixels.row_stride_bytes);
 }
 
 static PyObject *py_frame_copy_to_gl_texture(PyObject *self, PyObject *args) {
