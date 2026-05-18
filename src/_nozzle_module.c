@@ -71,6 +71,7 @@ static const char *error_code_str(NozzleErrorCode code) {
         case NOZZLE_ERROR_SENDER_CLOSED: return "sender_closed";
         case NOZZLE_ERROR_TIMEOUT: return "timeout";
         case NOZZLE_ERROR_BACKEND_ERROR: return "backend_error";
+        case NOZZLE_ERROR_COMMAND_FAILED: return "command_failed";
         default: return "unknown";
     }
 }
