@@ -63,3 +63,92 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+  package-linux-blender-smoke:
+    runs-on: ubuntu-22.04
+    env:
+      BLENDER_VERSION: "4.3.2"
+      BLENDER_SERIES: "4.3"
+      BLENDER_PLATFORM: linux-x64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            curl \
+            xz-utils \
+            xvfb \
+            libdrm-dev \
+            libgbm-dev \
+            libegl-dev \
+            libgl-dev \
+            libx11-6 \
+            libxi6 \
+            libxrender1 \
+            libxfixes3 \
+            libxkbcommon0 \
+            libxkbcommon-x11-0 \
+            libxxf86vm1 \
+            libdbus-1-3
+
+      - name: Download Blender
+        run: |
+          set -euo pipefail
+          url="https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-${BLENDER_PLATFORM}.tar.xz"
+          curl -fsSL "$url" -o /tmp/blender.tar.xz
+          mkdir -p /tmp/blender
+          tar -xf /tmp/blender.tar.xz -C /tmp/blender --strip-components=1
+          /tmp/blender/blender --background --factory-startup --version
+
+      - name: Configure against Blender Python
+        run: |
+          cmake -B build-blender \
+            -DBLENDER_PYTHON_PATH=/tmp/blender/${BLENDER_SERIES}/python \
+            -DNOZZLE_BUILD_TESTS=OFF \
+            -DNOZZLE_BUILD_EXAMPLES=OFF
+
+      - name: Build native addon module
+        run: cmake --build build-blender --config Release
+
+      - name: Package addon zip
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::7}"
+          python3 scripts/package_blender_addon.py \
+            --build-dir build-blender \
+            --output-dir dist \
+            --channel ci \
+            --short-sha "$short_sha" \
+            --platform linux-x64 \
+            --blender-version "$BLENDER_SERIES" | tee package-info.txt
+          unzip -l dist/*.zip
+
+      - name: Native linkage evidence
+        run: |
+          set -euo pipefail
+          native=$(find build-blender -maxdepth 2 -type f -name '_nozzle_native*.so' | head -n 1)
+          test -n "$native"
+          ldd "$native"
+
+      - name: Blender install and enable smoke
+        env:
+          BLENDER_USER_CONFIG: ${{ runner.temp }}/blender-user-config
+          BLENDER_USER_SCRIPTS: ${{ runner.temp }}/blender-user-scripts
+        run: |
+          set -euo pipefail
+          zip_path=$(find dist -maxdepth 1 -type f -name 'blender-nozzle-ci-*.zip' | head -n 1)
+          test -n "$zip_path"
+          timeout 180s xvfb-run -a /tmp/blender/blender \
+            --background \
+            --factory-startup \
+            --python scripts/smoke_blender_addon.py \
+            -- "$zip_path"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blender-nozzle-ci-linux-x64
+          path: dist/*.zip
