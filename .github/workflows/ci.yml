@@ -75,6 +75,10 @@ jobs:
         with:
           submodules: recursive
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -103,11 +107,11 @@ jobs:
           mkdir -p /tmp/blender
           tar -xf /tmp/blender.tar.xz -C /tmp/blender --strip-components=1
           /tmp/blender/blender --background --factory-startup --version
+          /tmp/blender/blender --background --factory-startup --python-expr "import sys; print(sys.version)"
 
-      - name: Configure against Blender Python
+      - name: Configure against Blender Python ABI
         run: |
           cmake -B build-blender \
-            -DBLENDER_PYTHON_PATH=/tmp/blender/${BLENDER_SERIES}/python \
             -DNOZZLE_BUILD_TESTS=OFF \
             -DNOZZLE_BUILD_EXAMPLES=OFF
 

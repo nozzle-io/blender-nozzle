@@ -10,11 +10,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 add_subdirectory(nozzle)
 
-# Find Python3 — prefer Blender's bundled Python if BLENDER_PYTHON_PATH is set
+# Find Python3 — prefer Blender's bundled Python if BLENDER_PYTHON_PATH is set.
+# On Unix-like platforms, build a Python extension module without linking
+# libpython; Blender provides the Python runtime. Windows extension modules need
+# the Python import library.
 if(BLENDER_PYTHON_PATH)
     set(Python3_ROOT_DIR "${BLENDER_PYTHON_PATH}")
 endif()
-find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+if(WIN32)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
+else()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter Development.Module)
+endif()
 
 # Platform detection
 if(APPLE)
@@ -36,8 +43,10 @@ target_include_directories(_nozzle_native PRIVATE
 
 target_link_libraries(_nozzle_native PRIVATE
     nozzle
-    ${Python3_LIBRARIES}
 )
+if(WIN32)
+    target_link_libraries(_nozzle_native PRIVATE ${Python3_LIBRARIES})
+endif()
 
 # Must not link libpython on macOS (Blender provides it)
 if(APPLE)
