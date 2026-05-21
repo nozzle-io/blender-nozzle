@@ -40,14 +40,22 @@ export BLENDER_PYTHON_PATH=/Applications/Blender.app/Contents/Resources/python
 python3 build.py
 ```
 
-This builds `_nozzle_native.so` (or `.pyd` on Windows) and copies it into `nozzle_blender/`.
+This builds `_nozzle_native` with the active Python ABI suffix (for example
+`_nozzle_native.cpython-313-darwin.so` on macOS or a `.pyd` on Windows) and
+copies it into `nozzle_blender/`.
 
 ## Installing in Blender
 
 1. Build the native module (see above)
 2. In Blender: Edit > Preferences > Add-ons > Install...
-3. Select the `nozzle_blender/` directory (the folder containing `__init__.py`)
+3. Select a zip whose top-level entry is the `nozzle_blender/` directory
+   containing `__init__.py`, the Python files, and the built `_nozzle_native`
+   extension
 4. Enable the "Nozzle Texture Sharing" addon
+
+The native extension is platform- and Python-ABI-specific. A package built
+against one Blender-bundled Python ABI is not a generic source zip for every
+Blender version/platform.
 
 ## Usage
 

@@ -65,7 +65,7 @@ class NozzleProperties(bpy.types.PropertyGroup):
 def _enum_senders(props):
     items = []
     try:
-        import _nozzle_native
+        from . import _nozzle_native
         senders = _nozzle_native.enumerate_senders()
         for s in senders:
             name = s.get("name", "")

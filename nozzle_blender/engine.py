@@ -1,6 +1,6 @@
 import bpy
 import gpu
-import _nozzle_native
+from . import _nozzle_native
 
 FORMAT = _nozzle_native.get_format_constants()
 GL = _nozzle_native.get_gl_constants()

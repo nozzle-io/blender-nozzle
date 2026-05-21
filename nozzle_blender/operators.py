@@ -1,5 +1,5 @@
 import bpy
-import _nozzle_native
+from . import _nozzle_native
 from .engine import NozzleEngine
 
 engine = NozzleEngine()

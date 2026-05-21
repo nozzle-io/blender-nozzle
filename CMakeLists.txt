@@ -47,9 +47,17 @@ if(APPLE)
 endif()
 
 # Extension suffix
+execute_process(
+    COMMAND "${Python3_EXECUTABLE}" -c "import sysconfig; print(sysconfig.get_config_var('EXT_SUFFIX') or '')"
+    OUTPUT_VARIABLE NOZZLE_NATIVE_SUFFIX
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+if(NOT NOZZLE_NATIVE_SUFFIX)
+    set(NOZZLE_NATIVE_SUFFIX "${CMAKE_SHARED_MODULE_SUFFIX}")
+endif()
 set_target_properties(_nozzle_native PROPERTIES
     PREFIX ""
-    SUFFIX "${Python3_SOABI}${CMAKE_SHARED_MODULE_SUFFIX}"
+    SUFFIX "${NOZZLE_NATIVE_SUFFIX}"
 )
 
 # Nozzle platform deps are already linked via the nozzle target
