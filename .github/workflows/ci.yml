@@ -166,3 +166,180 @@ jobs:
         with:
           name: blender-nozzle-ci-linux-x64
           path: dist/*.zip
+
+
+  package-macos-blender-smoke:
+    runs-on: macos-14
+    env:
+      BLENDER_VERSION: "4.3.2"
+      BLENDER_SERIES: "4.3"
+      BLENDER_PLATFORM: macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download Blender
+        run: |
+          set -euo pipefail
+          url="https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-${BLENDER_PLATFORM}.dmg"
+          curl -fsSL "$url" -o /tmp/blender.dmg
+          mkdir -p /tmp/blender-dmg
+          hdiutil attach /tmp/blender.dmg -mountpoint /tmp/blender-dmg -nobrowse -quiet
+          /tmp/blender-dmg/Blender.app/Contents/MacOS/Blender --background --factory-startup --version
+          /tmp/blender-dmg/Blender.app/Contents/MacOS/Blender --background --factory-startup --python-expr "import sys; print(sys.version)"
+
+      - name: Verify build Python matches Blender Python ABI
+        run: |
+          set -euo pipefail
+          blender_py=$(/tmp/blender-dmg/Blender.app/Contents/MacOS/Blender --background --factory-startup --python-expr 'import sys; print(f"NOZZLE_BLENDER_PY={sys.version_info.major}.{sys.version_info.minor}")' | sed -n 's/^NOZZLE_BLENDER_PY=//p' | tail -n 1)
+          build_py=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          echo "blender_python=$blender_py"
+          echo "build_python=$build_py"
+          test -n "$blender_py"
+          test "$blender_py" = "$build_py"
+
+      - name: Configure against Blender Python ABI
+        run: |
+          cmake -B build-blender \
+            -DNOZZLE_BUILD_TESTS=OFF \
+            -DNOZZLE_BUILD_EXAMPLES=OFF
+
+      - name: Build native addon module
+        run: cmake --build build-blender --config Release
+
+      - name: Package addon zip
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA::7}"
+          python3 scripts/package_blender_addon.py \
+            --build-dir build-blender \
+            --output-dir dist \
+            --channel ci \
+            --short-sha "$short_sha" \
+            --platform macos-arm64 \
+            --blender-version "$BLENDER_SERIES" | tee package-info.txt
+          unzip -l dist/*.zip
+
+      - name: Native linkage evidence
+        run: |
+          set -euo pipefail
+          native=$(find build-blender -maxdepth 2 -type f -name '_nozzle_native*.so' | head -n 1)
+          test -n "$native"
+          otool -L "$native"
+
+      - name: Blender install and enable smoke
+        env:
+          BLENDER_USER_CONFIG: ${{ runner.temp }}/blender-user-config
+          BLENDER_USER_SCRIPTS: ${{ runner.temp }}/blender-user-scripts
+        run: |
+          set -euo pipefail
+          zip_path=$(find dist -maxdepth 1 -type f -name 'blender-nozzle-ci-*.zip' | head -n 1)
+          test -n "$zip_path"
+          python3 scripts/run_with_timeout.py 180 -- \
+            /tmp/blender-dmg/Blender.app/Contents/MacOS/Blender \
+            --background \
+            --factory-startup \
+            --python scripts/smoke_blender_addon.py \
+            -- "$zip_path"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blender-nozzle-ci-macos-arm64
+          path: dist/*.zip
+
+  package-windows-blender-smoke:
+    runs-on: windows-2022
+    env:
+      BLENDER_VERSION: "4.3.2"
+      BLENDER_SERIES: "4.3"
+      BLENDER_PLATFORM: windows-x64
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Download Blender
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $url = "https://download.blender.org/release/Blender$env:BLENDER_SERIES/blender-$env:BLENDER_VERSION-$env:BLENDER_PLATFORM.zip"
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP\blender.zip"
+          Expand-Archive -Path "$env:RUNNER_TEMP\blender.zip" -DestinationPath "$env:RUNNER_TEMP\blender" -Force
+          $blender = Get-ChildItem "$env:RUNNER_TEMP\blender" -Recurse -Filter blender.exe | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $blender) { throw "blender.exe not found" }
+          "BLENDER_EXE=$blender" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          & $blender --background --factory-startup --version
+          & $blender --background --factory-startup --python-expr "import sys; print(sys.version)"
+
+      - name: Verify build Python matches Blender Python ABI
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $output = & $env:BLENDER_EXE --background --factory-startup --python-expr 'import sys; print(f"NOZZLE_BLENDER_PY={sys.version_info.major}.{sys.version_info.minor}")'
+          $blenderPy = ($output | Where-Object { $_ -like 'NOZZLE_BLENDER_PY=*' } | Select-Object -Last 1) -replace '^NOZZLE_BLENDER_PY=', ''
+          $buildPy = python -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+          "blender_python=$blenderPy"
+          "build_python=$buildPy"
+          if (-not $blenderPy) { throw "failed to read Blender Python ABI" }
+          if ($blenderPy -ne $buildPy) { throw "Blender/build Python ABI mismatch" }
+
+      - name: Configure against Blender Python ABI
+        run: cmake -B build-blender -DNOZZLE_BUILD_TESTS=OFF -DNOZZLE_BUILD_EXAMPLES=OFF
+
+      - name: Build native addon module
+        run: cmake --build build-blender --config Release
+
+      - name: Package addon zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          python scripts/package_blender_addon.py `
+            --build-dir build-blender `
+            --output-dir dist `
+            --channel ci `
+            --short-sha $shortSha `
+            --platform windows-x64 `
+            --blender-version $env:BLENDER_SERIES | Tee-Object -FilePath package-info.txt
+          Get-ChildItem dist
+
+      - name: Native linkage evidence
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $native = Get-ChildItem build-blender -Recurse -Include '_nozzle_native*.pyd' | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $native) { throw "native pyd not found" }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $dumpbin = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -find "VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin.exe not found" }
+          & $dumpbin /DEPENDENTS $native
+
+      - name: Blender install and enable smoke
+        shell: pwsh
+        env:
+          BLENDER_USER_CONFIG: ${{ runner.temp }}\blender-user-config
+          BLENDER_USER_SCRIPTS: ${{ runner.temp }}\blender-user-scripts
+        run: |
+          $ErrorActionPreference = "Stop"
+          $zipPath = Get-ChildItem dist -Filter 'blender-nozzle-ci-*.zip' | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $zipPath) { throw "package zip not found" }
+          python scripts/run_with_timeout.py 180 -- `
+            $env:BLENDER_EXE `
+            --background `
+            --factory-startup `
+            --python scripts/smoke_blender_addon.py `
+            -- $zipPath
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: blender-nozzle-ci-windows-x64
+          path: dist/*.zip
