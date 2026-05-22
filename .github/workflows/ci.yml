@@ -109,6 +109,15 @@ jobs:
           /tmp/blender/blender --background --factory-startup --version
           /tmp/blender/blender --background --factory-startup --python-expr "import sys; print(sys.version)"
 
+      - name: Verify build Python matches Blender Python ABI
+        run: |
+          set -euo pipefail
+          blender_py=$(/tmp/blender/blender --background --factory-startup --python-expr 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' | tail -n 1)
+          build_py=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+          echo "blender_python=$blender_py"
+          echo "build_python=$build_py"
+          test "$blender_py" = "$build_py"
+
       - name: Configure against Blender Python ABI
         run: |
           cmake -B build-blender \
