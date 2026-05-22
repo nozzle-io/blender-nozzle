@@ -112,10 +112,11 @@ jobs:
       - name: Verify build Python matches Blender Python ABI
         run: |
           set -euo pipefail
-          blender_py=$(/tmp/blender/blender --background --factory-startup --python-expr 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' | tail -n 1)
+          blender_py=$(/tmp/blender/blender --background --factory-startup --python-expr 'import sys; print(f"NOZZLE_BLENDER_PY={sys.version_info.major}.{sys.version_info.minor}")' | sed -n 's/^NOZZLE_BLENDER_PY=//p' | tail -n 1)
           build_py=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
           echo "blender_python=$blender_py"
           echo "build_python=$build_py"
+          test -n "$blender_py"
           test "$blender_py" = "$build_py"
 
       - name: Configure against Blender Python ABI
