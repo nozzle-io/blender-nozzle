@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "artifacts": [
+    {
+      "id": "blender-nozzle",
+      "latest_patterns": [
+        "blender-nozzle-latest-<short_sha>-blender4.3-macos-arm64-py311.zip",
+        "blender-nozzle-latest-<short_sha>-blender4.3-linux-x64-py311.zip",
+        "blender-nozzle-latest-<short_sha>-blender4.3-windows-x64-py311.zip"
+      ],
+      "versioned_patterns": [
+        "blender-nozzle-<tag>-blender4.3-macos-arm64-py311.zip",
+        "blender-nozzle-<tag>-blender4.3-linux-x64-py311.zip",
+        "blender-nozzle-<tag>-blender4.3-windows-x64-py311.zip"
+      ],
+      "workflow": {
+        "file": "ci.yml",
+        "release_job": "release",
+        "package_jobs": [
+          "package-macos-blender-smoke",
+          "package-linux-blender-smoke",
+          "package-windows-blender-smoke"
+        ],
+        "aggregate_release": true,
+        "latest_ref": "refs/heads/main",
+        "versioned_trigger": "refs/tags/v*",
+        "versioned_tag_policy": "exact-semver-vX.Y.Z"
+      },
+      "implementation": {
+        "channel_script": "scripts/resolve_release_channel.py",
+        "package_script": "scripts/package_blender_addon.py",
+        "release_script": "scripts/publish_release_assets.py"
+      }
+    }
+  ]
+}

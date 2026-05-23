@@ -458,16 +458,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Release artifact policy evidence
-        run: |
-          set -euo pipefail
-          echo "channel=latest refs/tags/v"
-          echo "package_name=blender-nozzle-latest-<short_sha>-blender4.3-macos-arm64-py311.zip"
-          echo "package_name=blender-nozzle-latest-<short_sha>-blender4.3-linux-x64-py311.zip"
-          echo "package_name=blender-nozzle-latest-<short_sha>-blender4.3-windows-x64-py311.zip"
-          echo "package_name=blender-nozzle-<tag>-blender4.3-macos-arm64-py311.zip refs/tags/v"
-          echo "package_name=blender-nozzle-<tag>-blender4.3-linux-x64-py311.zip refs/tags/v"
-          echo "package_name=blender-nozzle-<tag>-blender4.3-windows-x64-py311.zip refs/tags/v"
 
       - name: Validate release context before artifact download
         run: |
