@@ -38,6 +38,25 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-script-tests:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run release script tests
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            scripts/package_blender_addon.py \
+            scripts/release_policy.py \
+            scripts/resolve_release_channel.py \
+            scripts/publish_release_assets.py
+          python3 -m unittest tests/test_publish_release_assets.py
+
   build-macos:
     runs-on: macos-14
     steps:

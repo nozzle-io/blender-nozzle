@@ -193,7 +193,7 @@ def publish(channel: str, tag: str, paths: list[Path], args: argparse.Namespace)
 
 
 def normalize(paths: list[Path]) -> list[Path]:
-    staging = Path("release-staging")
+    staging = Path.cwd() / "release-staging"
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir()
@@ -205,7 +205,7 @@ def normalize(paths: list[Path]) -> list[Path]:
     return normalized
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifacts-dir", type=Path)
     parser.add_argument("--repo", required=True)
@@ -221,7 +221,7 @@ def main() -> None:
     parser.add_argument("--tag", default="")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--validate-context-only", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     channel, tag = validate_ref(args)
     print(f"release_channel={channel}")
