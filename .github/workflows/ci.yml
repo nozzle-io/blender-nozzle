@@ -55,7 +55,7 @@ jobs:
             scripts/release_policy.py \
             scripts/resolve_release_channel.py \
             scripts/publish_release_assets.py
-          python3 -m unittest tests/test_publish_release_assets.py
+          python3 -m unittest -v tests/test_publish_release_assets.py
 
   build-macos:
     runs-on: macos-14
