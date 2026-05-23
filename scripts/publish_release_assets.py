@@ -142,7 +142,7 @@ def delete_latest_assets(repo: str, dry_run: bool) -> None:
         if dry_run:
             print(f"dry-run: would delete latest asset {name} id={asset_id}")
         else:
-            run(["gh", "api", "-X", "DELETE", f"repos/{repo}/releases/assets/{asset_id}"])
+            run(["gh", "release", "delete-asset", "latest", name, "--repo", repo, "--yes"])
 
 
 def ensure_release(repo: str, tag: str, title: str, notes_file: Path, prerelease: bool, dry_run: bool) -> None:
