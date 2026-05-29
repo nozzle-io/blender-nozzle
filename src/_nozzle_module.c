@@ -394,11 +394,16 @@ static PyObject *py_frame_lock_writable_pixels(PyObject *self, PyObject *args) {
     Py_ssize_t total = (Py_ssize_t)pixels.row_stride_bytes * pixels.height;
     PyObject *bytes = PyBytes_FromStringAndSize((const char *)pixels.data, total);
     if (!bytes) {
+        /* Cleanup-only path: Python allocation already failed, so discard unlock errors. */
         nozzle_frame_unlock_writable_pixels(g_handles.frames[frame_handle]);
         return NULL;
     }
 
-    nozzle_frame_unlock_writable_pixels(g_handles.frames[frame_handle]);
+    err = nozzle_frame_unlock_writable_pixels_checked(g_handles.frames[frame_handle]);
+    if (err != NOZZLE_OK) {
+        Py_DECREF(bytes);
+        return check_error(err);
+    }
 
     return Py_BuildValue("(N I I i I)",
         bytes,
