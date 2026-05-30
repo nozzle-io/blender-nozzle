@@ -49,10 +49,13 @@ static void free_receiver_handle(int h) {
     }
 }
 
-static void free_frame_handle(int h) {
-    if (h >= 0 && h < MAX_HANDLES) {
-        g_handles.frames[h] = NULL;
+static NozzleFrame *take_frame_handle(int h) {
+    if (h < 0 || h >= MAX_HANDLES) {
+        return NULL;
     }
+    NozzleFrame *frame = g_handles.frames[h];
+    g_handles.frames[h] = NULL;
+    return frame;
 }
 
 // --- Error code to string ---
@@ -167,7 +170,8 @@ static PyObject *py_sender_acquire_writable_frame(PyObject *self, PyObject *args
 
     int fh = alloc_frame_handle(frame);
     if (fh < 0) {
-        nozzle_sender_commit_frame(g_handles.senders[handle], frame);
+        (void)nozzle_sender_discard_frame(g_handles.senders[handle], frame);
+        nozzle_frame_release(frame);
         PyErr_SetString(PyExc_RuntimeError, "too many frame handles");
         return NULL;
     }
@@ -185,15 +189,15 @@ static PyObject *py_sender_commit_frame(PyObject *self, PyObject *args) {
         PyErr_SetString(PyExc_ValueError, "invalid sender handle");
         return NULL;
     }
-    if (frame_handle < 0 || frame_handle >= MAX_HANDLES ||
-        g_handles.frames[frame_handle] == NULL) {
+    NozzleFrame *frame = take_frame_handle(frame_handle);
+    if (!frame) {
         PyErr_SetString(PyExc_ValueError, "invalid frame handle");
         return NULL;
     }
 
     NozzleErrorCode err = nozzle_sender_commit_frame(
-        g_handles.senders[sender_handle], g_handles.frames[frame_handle]);
-    free_frame_handle(frame_handle);
+        g_handles.senders[sender_handle], frame);
+    nozzle_frame_release(frame);
     return check_error(err);
 }
 
@@ -301,14 +305,13 @@ static PyObject *py_receiver_release_frame(PyObject *self, PyObject *args) {
     int frame_handle;
     if (!PyArg_ParseTuple(args, "i", &frame_handle)) return NULL;
 
-    if (frame_handle < 0 || frame_handle >= MAX_HANDLES ||
-        g_handles.frames[frame_handle] == NULL) {
+    NozzleFrame *frame = take_frame_handle(frame_handle);
+    if (!frame) {
         PyErr_SetString(PyExc_ValueError, "invalid frame handle");
         return NULL;
     }
 
-    nozzle_frame_release(g_handles.frames[frame_handle]);
-    free_frame_handle(frame_handle);
+    nozzle_frame_release(frame);
     Py_RETURN_NONE;
 }
 
