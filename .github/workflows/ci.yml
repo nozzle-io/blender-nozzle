@@ -173,11 +173,17 @@ jobs:
       - name: Configure against Blender Python ABI
         run: |
           cmake -B build-blender \
+            -DCMAKE_BUILD_TYPE=Release \
             -DNOZZLE_BUILD_TESTS=OFF \
             -DNOZZLE_BUILD_EXAMPLES=OFF
 
+      - name: Verify single-config Release configuration
+        run: |
+          grep -E '^CMAKE_(GENERATOR|BUILD_TYPE|C_FLAGS|CXX_FLAGS)(:|_RELEASE:)' build-blender/CMakeCache.txt
+          grep -Fx 'CMAKE_BUILD_TYPE:STRING=Release' build-blender/CMakeCache.txt
+
       - name: Build native addon module
-        run: cmake --build build-blender --config Release
+        run: cmake --build build-blender --config Release --verbose
 
       - name: Verify x86-64-v2 ISA baseline
         run: |
@@ -281,11 +287,17 @@ jobs:
       - name: Configure against Blender Python ABI
         run: |
           cmake -B build-blender \
+            -DCMAKE_BUILD_TYPE=Release \
             -DNOZZLE_BUILD_TESTS=OFF \
             -DNOZZLE_BUILD_EXAMPLES=OFF
 
+      - name: Verify single-config Release configuration
+        run: |
+          grep -E '^CMAKE_(GENERATOR|BUILD_TYPE|C_FLAGS|CXX_FLAGS)(:|_RELEASE:)' build-blender/CMakeCache.txt
+          grep -Fx 'CMAKE_BUILD_TYPE:STRING=Release' build-blender/CMakeCache.txt
+
       - name: Build native addon module
-        run: cmake --build build-blender --config Release
+        run: cmake --build build-blender --config Release --verbose
 
       - name: Resolve release channel
         run: |
