@@ -23,6 +23,7 @@ Early development. Functional sender (GL texture publish) and receiver (pixel co
 
 - Blender 3.0+
 - macOS 12+ / Windows 10+ / Linux
+- The published Linux x64 build targets **x86-64-v2** (no AVX, AVX2, FMA or F16C). CI sets this explicitly and verifies the binary with `nozzle/scripts/check_x86_64_isa.sh`.
 - CMake 3.20+
 - C++17 compiler
 
