@@ -117,6 +117,10 @@ jobs:
     runs-on: ubuntu-22.04
     env:
       BLENDER_PLATFORM: linux-x64
+      # nozzle-dev#196: published Linux binaries target x86-64-v2 explicitly, not
+      # whatever the build image's compiler defaults to.
+      CFLAGS: -march=x86-64-v2 -mtune=generic
+      CXXFLAGS: -march=x86-64-v2 -mtune=generic
     steps:
       - uses: actions/checkout@v4
         with:
@@ -174,6 +178,13 @@ jobs:
 
       - name: Build native addon module
         run: cmake --build build-blender --config Release
+
+      - name: Verify x86-64-v2 ISA baseline
+        run: |
+          set -euo pipefail
+          native=$(find build-blender -maxdepth 2 -type f -name '_nozzle_native*.so' | head -n 1)
+          test -n "$native"
+          bash nozzle/scripts/check_x86_64_isa.sh "$native"
 
       - name: Resolve release channel
         run: |
