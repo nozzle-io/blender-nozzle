@@ -288,6 +288,7 @@ jobs:
         run: |
           cmake -B build-blender \
             -DCMAKE_BUILD_TYPE=Release \
+            -DNOZZLE_BLENDER_PIXEL_PEER=ON \
             -DNOZZLE_BUILD_TESTS=OFF \
             -DNOZZLE_BUILD_EXAMPLES=OFF
 
@@ -352,6 +353,20 @@ jobs:
             --factory-startup \
             --python scripts/smoke_blender_addon.py \
             -- "$zip_path"
+
+      - name: Independent native sender to real Blender image
+        env:
+          BLENDER_USER_CONFIG: ${{ runner.temp }}/blender-peer-config
+          BLENDER_USER_SCRIPTS: ${{ runner.temp }}/blender-peer-scripts
+        run: |
+          set -euo pipefail
+          zips=(dist/blender-nozzle-*.zip)
+          test "${#zips[@]}" = 1
+          python3 scripts/run_with_timeout.py 120 -- \
+            /tmp/blender-dmg/Blender.app/Contents/MacOS/Blender \
+            --background --factory-startup --python-exit-code 1 \
+            --python tests/blender_receive_peer.py -- \
+            "${zips[0]}" build-blender/libblender_pixel_peer.dylib
 
       - uses: actions/upload-artifact@v4
         with:
