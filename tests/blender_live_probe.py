@@ -1,6 +1,7 @@
 """Invoke real UI operators; observation timers never drive addon processing."""
 import ctypes
 import json
+import math
 import os
 import statistics
 import struct
@@ -109,40 +110,64 @@ class LiveProbe:
             self.record("live_image_arrived", image is not None)
             if image is None:
                 self.fail("live_receive", "no image after Start Receiver and one second of event-loop time")
-            with self.context():
-                # This control is separate from the live observation above.
-                result = bpy.ops.nozzle.receive_texture()
-                image = bpy.data.images.get("__nozzle_received__")
-                if result != {"FINISHED"} or image is None or tuple(image.size) != (65, 3):
-                    self.fail("single_receive_control", f"result={result}, image={image}")
-                else:
-                    expected = [192/255, 20/255, 42/255]
-                    expected = [value/12.92 if value <= 0.04045 else ((value+0.055)/1.055)**2.4 for value in expected]
-                    expected.append(149/255)
-                    actual = list(image.pixels[:4])
-                    if any(abs(a-b) > 1e-6 for a, b in zip(actual, expected)):
-                        self.fail("single_receive_control", f"pixels={actual}, expected={expected}")
-                    else:
-                        self.record("single_receive_control", "PASS native asymmetric pixel")
-                props = bpy.context.scene.nozzle_props
-                if self.sender_started:
-                    observer = self.native.create_receiver(props.sender_name)
-                    try:
-                        frame = self.native.receiver_acquire_frame(observer, 100)
-                        self.record("live_sender_frame_arrived", frame is not None)
-                        if frame is None:
-                            self.fail("live_send", "no frame after Start Sender")
-                        else:
-                            self.native.receiver_release_frame(frame)
-                    finally:
-                        self.native.destroy_receiver(observer)
-            self.stop_operators()
-            self.measure_conversion()
+            try:
+                self.check_single_receive()
+            except Exception as error:
+                self.fail("single_receive_control", f"{type(error).__name__}: {error}")
+            try:
+                self.check_live_sender()
+            except Exception as error:
+                self.fail("live_send", f"{type(error).__name__}: {error}")
         except Exception as error:
             traceback.print_exc()
             self.fail("observation", error)
+        try:
+            self.stop_operators()
+        except Exception as error:
+            self.fail("stop_operators", error)
+        try:
+            self.measure_conversion()
+        except Exception as error:
+            self.fail("conversion", error)
         self.finish()
         return None
+
+    def check_single_receive(self):
+        # This control is separate from the live observation above.
+        with self.context():
+            result = bpy.ops.nozzle.receive_texture()
+            image = bpy.data.images.get("__nozzle_received__")
+            if result != {"FINISHED"} or image is None or tuple(image.size) != (65, 3):
+                self.fail("single_receive_control", f"result={result}, image={image}")
+            else:
+                expected = [192/255, 20/255, 42/255]
+                expected = [value/12.92 if value <= 0.04045 else ((value+0.055)/1.055)**2.4 for value in expected]
+                expected.append(149/255)
+                actual = list(image.pixels[:4])
+                if len(actual) != 4 or any(not math.isfinite(a) or abs(a-b) > 1e-6 for a, b in zip(actual, expected)):
+                    self.fail("single_receive_control", f"pixels={actual}, expected={expected}")
+                else:
+                    self.record("single_receive_control", "PASS native asymmetric pixel")
+
+    def check_live_sender(self):
+        if self.sender_started:
+            with self.context():
+                props = bpy.context.scene.nozzle_props
+                observer = self.native.create_receiver(props.sender_name)
+                try:
+                    try:
+                        frame = self.native.receiver_acquire_frame(observer, 100)
+                    except RuntimeError as error:
+                        self.record("live_sender_frame_arrived", False)
+                        self.fail("live_send", f"acquire failed: {error}")
+                        return
+                    self.record("live_sender_frame_arrived", frame is not None)
+                    if frame is None:
+                        self.fail("live_send", "no frame after Start Sender")
+                    else:
+                        self.native.receiver_release_frame(frame)
+                finally:
+                    self.native.destroy_receiver(observer)
 
     def stop_operators(self):
         if self.native is None or self.area is None:
@@ -160,8 +185,13 @@ class LiveProbe:
                     except Exception as error:
                         self.fail(f"stop_{kind}", error)
                         # Probe cleanup only, not evidence that the operator worked.
-                        getattr(self.native, f"destroy_{kind}")(handle)
-                        setattr(props, f"{kind}_handle", -1)
+                        remaining = getattr(props, f"{kind}_handle")
+                        if remaining >= 0:
+                            try:
+                                getattr(self.native, f"destroy_{kind}")(remaining)
+                                setattr(props, f"{kind}_handle", -1)
+                            except Exception as cleanup_error:
+                                self.fail(f"cleanup_{kind}", cleanup_error)
 
     def measure_conversion(self):
         from nozzle_blender.engine import _image_pixels
@@ -183,18 +213,31 @@ class LiveProbe:
             self.record(f"conversion_{kind}", self.report["conversion_seconds"][kind])
 
     def finish(self):
-        self.stop_operators()
-        if self.sender:
-            self.peer.blender_peer_destroy(self.sender)
-            self.sender = None
-        self.report["failures"] = self.failures
-        output = Path("artifacts/blender-live-probe.json")
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(self.report, indent=2) + "\n")
-        print(f"BLENDER_LIVE_RESULT failures={len(self.failures)} evidence={output}", flush=True)
-        sys.stdout.flush()
-        sys.stderr.flush()
-        os._exit(1 if self.failures else 0)
+        try:
+            self.stop_operators()
+        except Exception as error:
+            self.fail("cleanup_operators", error)
+        try:
+            if self.sender:
+                self.peer.blender_peer_destroy(self.sender)
+                self.sender = None
+        except Exception as error:
+            self.fail("cleanup_peer", error)
+        try:
+            self.report["failures"] = self.failures
+            output = Path("artifacts/blender-live-probe.json")
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_text(json.dumps(self.report, indent=2) + "\n")
+            print(f"BLENDER_LIVE_RESULT failures={len(self.failures)} evidence={output}", flush=True)
+        except Exception as error:
+            self.fail("persist_evidence", error)
+            print(json.dumps(self.report), flush=True)
+        finally:
+            try:
+                sys.stdout.flush()
+                sys.stderr.flush()
+            finally:
+                os._exit(1 if self.failures else 0)
 
 
 probe = LiveProbe()
