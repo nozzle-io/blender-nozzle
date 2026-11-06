@@ -197,15 +197,22 @@ class LifecycleProbe:
                 return self.next("switched")
             if self.phase == "switched":
                 self.check("workspace_actually_changed", self.window.screen.as_pointer() != self.old_screen)
+                session = self.session()
+                self.old_sent = session.sent if session else 0
                 self.publish(3)
                 return self.next("workspace_updated")
             if self.phase == "workspace_updated":
                 self.expect_pixels("receiver_survives_workspace", 3)
                 self.check("workspace_receiver_identity", self.props.receiver_handle == self.old_receiver)
                 session = self.session()
-                progressed = bool(session and session.sent > self.old_sent)
-                self.check("sender_not_silently_stopped", progressed or bool(self.props.last_error), self.props.last_error)
+                progressed = bool(session and session.sender is not None and self.props.is_sending
+                                  and session.sent > self.old_sent)
+                sender_status = "sender" in self.props.last_error.lower()
+                self.check("sender_not_silently_stopped", progressed or sender_status, self.props.last_error)
                 self.stop()
+                for area in self.window.screen.areas:
+                    if area.type == "VIEW_3D":
+                        area.type = "TEXT_EDITOR"
                 area = next(a for a in self.window.screen.areas if a.type != "VIEW_3D"
                             and any(r.type == "WINDOW" for r in a.regions))
                 self.operator("start_receiver", area)
@@ -220,20 +227,25 @@ class LifecycleProbe:
         return None
 
     def finish(self):
+        for label, cleanup in (("live_cleanup", lambda: self.live.shutdown() if self.live else None),
+                               ("child_cleanup", self.end_producer)):
+            try:
+                cleanup()
+            except Exception as error:
+                self.check(label, False, str(error))
         try:
-            if self.live is not None:
-                self.live.shutdown()
-            self.end_producer()
-        except Exception as error:
-            self.check("cleanup", False, str(error))
-        finally:
             output = Path("artifacts/blender-live-lifecycle.json")
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(json.dumps({"observations": self.observations, "failures": self.failures}, indent=2) + "\n")
-            print(f"BLENDER_LIFECYCLE_RESULT failures={len(self.failures)}", flush=True)
-            sys.stdout.flush()
-            sys.stderr.flush()
-            os._exit(1 if self.failures else 0)
+        except Exception as error:
+            self.check("persist_evidence", False, str(error))
+        finally:
+            try:
+                print(f"BLENDER_LIFECYCLE_RESULT failures={len(self.failures)}", flush=True)
+                sys.stdout.flush()
+                sys.stderr.flush()
+            finally:
+                os._exit(1 if self.failures else 0)
 
 
 probe = LifecycleProbe()
