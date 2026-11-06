@@ -30,8 +30,8 @@ def _image_pixels(result, semantic_format):
     values = np.empty((height, width, 4), dtype=np.float32)
     if storage_format in byte_formats:
         for dst, src in enumerate((2, 1, 0) if bgra else (0, 1, 2)):
-            np.take(_SRGB, source[:, :, src], out=values[:, :, dst])
-        np.take(_ALPHA, source[:, :, 3], out=values[:, :, 3])
+            values[:, :, dst] = _SRGB[source[:, :, src]]
+        values[:, :, 3] = _ALPHA[source[:, :, 3]]
     else:
         np.copyto(values, source)
     return values.reshape(-1)
