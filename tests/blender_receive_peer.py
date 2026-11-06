@@ -152,6 +152,49 @@ def main():
             native.destroy_receiver(receiver)
         peer.blender_peer_destroy_external(sender)
 
+    # Same-size color frames must update the existing float image, not replace it.
+    for kind in ("RGBA32_FLOAT", "RGBA8_UNORM"):
+        previous = bpy.data.images[engine._receive_image_name]
+        previous_pointer = previous.as_pointer()
+        previous_pixels = list(previous.pixels)
+        image_pointers = {item.as_pointer() for item in bpy.data.images}
+        if tuple(previous.size) != (65, 3) or previous.colorspace_settings.name != default_float_space:
+            raise AssertionError("reuse fixture must start at the correct size and float role")
+        name = f"blender-reuse-{os.getpid()}-{kind}"
+        sender = peer.blender_peer_publish(name.encode(), 65, 3, formats[kind], 0)
+        if not sender:
+            raise RuntimeError(f"native reuse setup failed: {kind}; no SKIP")
+        receiver = None
+        total += 1
+        try:
+            receiver = native.create_receiver(name)
+            if not engine.receive_to_image(bpy.context, receiver):
+                raise AssertionError("same-size receive returned false")
+            image = bpy.data.images[engine._receive_image_name]
+            if image.as_pointer() != previous_pointer or image != previous or image_node.image != image:
+                raise AssertionError("same-size receive replaced the image or lost its material user")
+            expected = [v for row in range(3) for x in range(65) for v in expected_pixel(kind, x, 2-row)]
+            actual = list(image.pixels)
+            exact = kind == "RGBA32_FLOAT"
+            if actual == previous_pixels:
+                raise AssertionError("same-size receive kept stale pixels")
+            if len(actual) != len(expected) or any(
+                    not math.isfinite(a) or (a != e if exact else abs(a-e) > 1e-6)
+                    for a, e in zip(actual, expected)):
+                raise AssertionError(f"same-size receive pixels mismatch: {kind}")
+            if not image.is_float or image.colorspace_settings.is_data or image.colorspace_settings.name != default_float_space:
+                raise AssertionError("same-size receive changed float image/color role")
+            if {item.as_pointer() for item in bpy.data.images} != image_pointers or any(
+                    item.name.startswith("__nozzle_float_role__")
+                    or item.name.startswith(engine._receive_image_name + ".")
+                    for item in bpy.data.images):
+                raise AssertionError("same-size receive left a temporary or duplicate image")
+            print(f"BLENDER_IMAGE_PASS reuse format={kind} same_image/new_pixels/material/no_leaks", flush=True)
+        finally:
+            if receiver is not None:
+                native.destroy_receiver(receiver)
+            peer.blender_peer_destroy(sender)
+
     # Unsupported native input must preserve the previously received image.
     previous = bpy.data.images[engine._receive_image_name]
     previous_pixels = list(previous.pixels)

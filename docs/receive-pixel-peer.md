@@ -52,6 +52,11 @@ incorrect sRGB or Non-Color settings.
 An attached material image node must keep pointing to the received image through
 byte-to-float upgrades and resizing. Replacement buffers are populated before
 existing users are remapped and the old image is removed.
+Separate same-size RGBA32_FLOAT then RGBA8_UNORM receives leave the correct role
+untouched and must reuse the same image datablock, update every pixel to the new
+values, preserve its material user, and leave no temporary role image or numbered
+duplicate. These use independent native senders; they test Blender image reuse,
+not sender reconnection or multiple-frame streaming on one native receiver.
 The single-frame receive operator catches conversion/native errors, reports an
 ERROR and cancels. Its production `execute` method is exercised with a real R8
 native peer and a captured report callback, not a rendered GUI notification.
