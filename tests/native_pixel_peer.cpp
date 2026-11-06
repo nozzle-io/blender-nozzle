@@ -1,11 +1,16 @@
 #include <nozzle/nozzle_c.h>
+#include <nozzle/nozzle.hpp>
+#include <nozzle/pixel_access.hpp>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <memory>
+#include <new>
 
 namespace {
 struct resources {
     NozzleSender *sender = nullptr;
+    NozzleReceiver *receiver = nullptr;
     NozzleFrame *frame = nullptr;
     NozzlePixelMapping *mapping = nullptr;
     bool committed = false;
@@ -16,6 +21,7 @@ struct resources {
             nozzle_frame_release(frame);
         }
         if(sender) nozzle_sender_destroy(sender);
+        if(receiver) nozzle_receiver_destroy(receiver);
     }
 };
 bool ok(NozzleErrorCode error, const char *where) {
@@ -93,4 +99,64 @@ extern "C" void *blender_peer_publish(const char *name, int width, int height,
 
 extern "C" void blender_peer_destroy(void *sender) {
     nozzle_sender_destroy(static_cast<NozzleSender *>(sender));
+}
+
+namespace {
+struct external_peer {
+    nozzle::sender sender;
+    nozzle::writable_frame frame;
+    ~external_peer() {
+        if(frame.valid()) (void)sender.discard_frame(frame);
+    }
+};
+}
+
+extern "C" void *blender_peer_publish_external(const char *name) {
+    std::unique_ptr<external_peer> peer(new (std::nothrow) external_peer);
+    if(!peer) return nullptr;
+    nozzle::sender_desc desc;
+    desc.name = name;
+    auto sender = nozzle::sender::create(desc);
+    if(!sender.ok()) return nullptr;
+    peer->sender = std::move(sender.value());
+    auto frame = peer->sender.acquire_writable_frame({65, 3, nozzle::texture_format::bgra8_unorm});
+    if(!frame.ok()) return nullptr;
+    peer->frame = std::move(frame.value());
+    auto mapping = nozzle::lock_writable_pixels_mapping_with_origin(peer->frame, nozzle::texture_origin::top_left);
+    if(!mapping.ok()) return nullptr;
+    const auto &pixels = mapping.value().pixels();
+    if(pixels.format != nozzle::texture_format::bgra8_unorm || !pixels.data || pixels.row_stride_bytes < 65*4) return nullptr;
+    for(int y = 0; y < 3; ++y) {
+        auto *row = static_cast<uint8_t *>(pixels.data) + y*pixels.row_stride_bytes;
+        for(int x = 0; x < 65; ++x) {
+            row[4*x] = 40+y;
+            row[4*x+1] = 20+x%193;
+            row[4*x+2] = 190+y;
+            row[4*x+3] = 149+x%73;
+        }
+    }
+    if(!mapping.value().unlock_checked().ok() ||
+       !peer->sender.publish_external_texture(peer->frame.get_texture()).ok()) return nullptr;
+
+    resources observer;
+    NozzleReceiverDesc receiver_desc{};
+    receiver_desc.name = name;
+    NozzleAcquireDesc acquire{};
+    acquire.timeout_ms = 3000;
+    NozzleFrameInfo raw{};
+    NozzleResolvedTextureFormat resolved{};
+    if(!ok(nozzle_receiver_create(&receiver_desc, &observer.receiver), "external observer create") ||
+       !ok(nozzle_receiver_acquire_frame(observer.receiver, &acquire, &observer.frame), "external observer acquire") ||
+       !ok(nozzle_frame_get_info(observer.frame, &raw), "external raw info") ||
+       !ok(nozzle_frame_get_resolved_format(observer.frame, &resolved), "external resolved info")) return nullptr;
+    std::printf("BLENDER_EXTERNAL raw_semantic=%d resolved_semantic=%d storage=%d\n",
+                (int)raw.semantic_format, (int)resolved.semantic_format, (int)resolved.storage_format);
+    if(raw.semantic_format != NOZZLE_FORMAT_UNKNOWN ||
+       resolved.semantic_format != NOZZLE_FORMAT_BGRA8_UNORM ||
+       resolved.storage_format != NOZZLE_FORMAT_BGRA8_UNORM) return nullptr;
+    return peer.release();
+}
+
+extern "C" void blender_peer_destroy_external(void *handle) {
+    delete static_cast<external_peer *>(handle);
 }

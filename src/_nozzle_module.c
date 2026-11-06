@@ -333,13 +333,22 @@ static PyObject *py_frame_get_info(PyObject *self, PyObject *args) {
         return check_error(err);
     }
 
-    return Py_BuildValue("{sK sK sI sI si si sI}",
+    NozzleTextureFormat semantic_format = info.semantic_format;
+    if (semantic_format == NOZZLE_FORMAT_UNKNOWN) {
+        NozzleResolvedTextureFormat resolved = {0};
+        err = nozzle_frame_get_resolved_format(g_handles.frames[frame_handle], &resolved);
+        if (err != NOZZLE_OK) return check_error(err);
+        semantic_format = resolved.semantic_format;
+    }
+
+    return Py_BuildValue("{sK sK sI sI si si si sI}",
         "frame_index", info.frame_index,
         "timestamp_ns", info.timestamp_ns,
         "width", info.width,
         "height", info.height,
         "format", (int)info.format,
-        "semantic_format", (int)info.semantic_format,
+        "semantic_format", (int)semantic_format,
+        "raw_semantic_format", (int)info.semantic_format,
         "dropped_frame_count", info.dropped_frame_count);
 }
 

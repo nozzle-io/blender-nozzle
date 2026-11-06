@@ -30,6 +30,11 @@ native view). It uses resolved bytes-per-pixel only when resolved storage agrees
 with the mapping, checks signed row bounds and checked unlock, and never copies
 native padding. `tests/pixel_rows.c` supplements the native test with synthetic
 negative source stride, padding, capacity and overflow checks.
+`frame_get_info` exposes effective `semantic_format` and `raw_semantic_format`;
+only an unknown raw semantic format falls back to core's resolved semantics.
+An independent public C++ external-texture producer exercises this condition,
+and a native C API observer proves raw UNKNOWN versus resolved BGRA8 before
+Blender receives it. No shared metadata is patched by the test.
 
 The image helper accepts RGBA8/BGRA8 UNORM or sRGB, RGBA16_FLOAT and
 RGBA32_FLOAT. Channel order comes from the mapping, while sRGB transfer comes
@@ -42,6 +47,9 @@ encoded values there; there is no heuristic detection. The received image uses
 the active OCIO data role (`colorspace_settings.is_data = True`) to avoid any
 second input color transform. The CI oracle checks that setting, starts with a
 same-size byte image, resizes, and resets an existing image's wrong sRGB setting.
+An attached material image node must keep pointing to the received image through
+byte-to-float upgrades and resizing. Replacement buffers are populated before
+existing users are remapped and the old image is removed.
 
 The native matrix covers UNORM byte, half and float only: pinned core rejects
 sRGB IOSurface creation. sRGB conversion is supplementary CPU-only evidence,

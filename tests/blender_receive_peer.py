@@ -60,6 +60,10 @@ def main():
     peer.blender_peer_publish.restype = ctypes.c_void_p
     peer.blender_peer_destroy.argtypes = [ctypes.c_void_p]
     peer.blender_peer_destroy.restype = None
+    peer.blender_peer_publish_external.argtypes = [ctypes.c_char_p]
+    peer.blender_peer_publish_external.restype = ctypes.c_void_p
+    peer.blender_peer_destroy_external.argtypes = [ctypes.c_void_p]
+    peer.blender_peer_destroy_external.restype = None
     formats = native.get_format_constants()
     failed = total = 0
     engine = NozzleEngine()
@@ -68,7 +72,11 @@ def main():
              for width in (65, 641) for bottom in (0, 1)]
     # No padding: isolates the pre-fix 0..255 -> unit float assignment bug.
     cases.insert(0, ("RGBA8_UNORM", 64, 0))
-    bpy.data.images.new(engine._receive_image_name, width=64, height=3, float_buffer=False)
+    legacy = bpy.data.images.new(engine._receive_image_name, width=64, height=3, float_buffer=False)
+    material = bpy.data.materials.new("nozzle-receive-peer")
+    material.use_nodes = True
+    image_node = material.node_tree.nodes.new("ShaderNodeTexImage")
+    image_node.image = legacy
     for kind, width, bottom in cases:
         total += 1
         name = f"blender-peer-{os.getpid()}-{total}"
@@ -85,6 +93,8 @@ def main():
             if not engine.receive_to_image(bpy.context, receiver):
                 raise AssertionError("production receive_to_image returned false")
             image = bpy.data.images[engine._receive_image_name]
+            if image_node.image != image:
+                raise AssertionError("replacing the receive image disconnected its material user")
             values = list(image.pixels)
             if len(values) != width * 3 * 4:
                 raise AssertionError(f"image component count={len(values)}")
@@ -108,6 +118,31 @@ def main():
             if receiver is not None:
                 native.destroy_receiver(receiver)
             peer.blender_peer_destroy(sender)
+    # Public external-texture publication has unknown raw semantics but a valid
+    # resolved format in the pinned core. The native observer asserts that fact.
+    name = f"blender-external-{os.getpid()}"
+    sender = peer.blender_peer_publish_external(name.encode())
+    if not sender:
+        raise RuntimeError("native external publication setup failed; no SKIP")
+    receiver = None
+    total += 1
+    try:
+        receiver = native.create_receiver(name)
+        if not engine.receive_to_image(bpy.context, receiver):
+            raise AssertionError("external receive returned false")
+        image = bpy.data.images[engine._receive_image_name]
+        if not image.is_float or not image.colorspace_settings.is_data or image_node.image != image:
+            raise AssertionError("external receive image contract/user mismatch")
+        expected = [v for row in range(3) for x in range(65) for v in expected_pixel("BGRA8_UNORM", x, 2-row)]
+        actual = list(image.pixels)
+        if len(actual) != len(expected) or any(not math.isfinite(a) or abs(a-e) > 1e-6 for a, e in zip(actual, expected)):
+            raise AssertionError("external receive pixels mismatch")
+        print("BLENDER_IMAGE_PASS external native texture with unknown raw semantics", flush=True)
+    finally:
+        if receiver is not None:
+            native.destroy_receiver(receiver)
+        peer.blender_peer_destroy_external(sender)
+
     # Unsupported native input must preserve the previously received image.
     previous = bpy.data.images[engine._receive_image_name]
     previous_pixels = list(previous.pixels)

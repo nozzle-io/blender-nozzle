@@ -105,23 +105,25 @@ class NozzleEngine:
             values = _image_pixels(result, info["semantic_format"])
 
             image_name = self._receive_image_name
-            if image_name in bpy.data.images:
-                image = bpy.data.images[image_name]
-                if image.size[0] != w or image.size[1] != h or not image.is_float:
+            previous = bpy.data.images.get(image_name)
+            replace = previous is None or tuple(previous.size) != (w, h) or not previous.is_float
+            image = bpy.data.images.new(image_name, width=w, height=h, alpha=True, float_buffer=True) if replace else previous
+            try:
+                image.alpha_mode = "STRAIGHT"
+                # Values are already linear (or untagged UNORM assumed linear).
+                # The OCIO data role avoids a second color-space conversion.
+                image.colorspace_settings.is_data = True
+                image.pixels.foreach_set(values)
+                image.update()
+            except Exception:
+                if replace:
                     bpy.data.images.remove(image)
-                    image = None
-            else:
-                image = None
-
-            if image is None:
-                image = bpy.data.images.new(image_name, width=w, height=h, alpha=True, float_buffer=True)
-
-            image.alpha_mode = "STRAIGHT"
-            # Values are already linear (or untagged UNORM assumed linear).
-            # The OCIO data role avoids a second color-space conversion.
-            image.colorspace_settings.is_data = True
-            image.pixels.foreach_set(values)
-            image.update()
+                raise
+            if replace:
+                if previous is not None:
+                    previous.user_remap(image)
+                    bpy.data.images.remove(previous)
+                image.name = image_name
             return True
         finally:
             _nozzle_native.receiver_release_frame(frame_handle)

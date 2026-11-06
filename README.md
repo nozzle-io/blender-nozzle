@@ -73,6 +73,24 @@ Blender version/platform.
 2. Select a sender and click **Start Receiver**
 3. Received frames appear as `__nozzle_received__` image in Blender
 
+The receive image uses a float buffer: RGBA8/BGRA8 are normalized to unit
+floats, and RGBA16F/RGBA32F retain negative/HDR values without byte quantization.
+Other image layouts are rejected. Native storage channel order and padding are
+handled before assigning bottom-up RGBA values to Blender.
+
+UNORM without an sRGB semantic tag is assumed linear. Explicit sRGB semantics
+decode RGB once, leaving alpha unchanged. The image uses the active OCIO data
+role to avoid a second input color transform; encoded data in an untagged UNORM
+source cannot be detected automatically. Native Metal sRGB transport is not
+supported by the pinned core, even though the CPU conversion understands it.
+
+Existing byte images are replaced with float images; for 8-bit inputs this costs
+approximately four times the image pixel-buffer memory. Received images are
+live buffers and are no longer automatically packed into a file every frame.
+See [receive evidence boundaries](docs/receive-pixel-peer.md) for the real-Blender
+native-peer CI coverage; build/import success on another platform is not pixel
+interoperability evidence.
+
 ## Architecture
 
 ```
