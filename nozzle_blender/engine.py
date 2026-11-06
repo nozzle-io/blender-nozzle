@@ -14,7 +14,6 @@ NOZZLE_FORMAT_RGBA8_UNORM = FORMAT["RGBA8_UNORM"]
 def _image_pixels(result, semantic_format):
     data, width, height, storage_format, stride = result
     byte_formats = {FORMAT[key] for key in ("RGBA8_UNORM", "BGRA8_UNORM", "RGBA8_SRGB", "BGRA8_SRGB")}
-    srgb_formats = {FORMAT["RGBA8_SRGB"], FORMAT["BGRA8_SRGB"]}
     if storage_format in byte_formats and semantic_format in byte_formats:
         pixel = struct.Struct("=4B")
     elif storage_format == semantic_format == FORMAT["RGBA16_FLOAT"]:
@@ -35,8 +34,9 @@ def _image_pixels(result, semantic_format):
                 rgba = [value / 255.0 for value in rgba]
                 if bgra:
                     rgba[0], rgba[2] = rgba[2], rgba[0]
-                if semantic_format in srgb_formats:
-                    rgba[:3] = [v/12.92 if v <= 0.04045 else ((v+0.055)/1.055)**2.4 for v in rgba[:3]]
+                # This image receiver assumes untagged byte color is encoded
+                # sRGB too. Float input is already scene linear.
+                rgba[:3] = [v/12.92 if v <= 0.04045 else ((v+0.055)/1.055)**2.4 for v in rgba[:3]]
             values.extend(rgba)
     return values
 
@@ -106,13 +106,18 @@ class NozzleEngine:
 
             image_name = self._receive_image_name
             previous = bpy.data.images.get(image_name)
-            replace = previous is None or tuple(previous.size) != (w, h) or not previous.is_float
+            reference = bpy.data.images.new("__nozzle_float_role__", width=1, height=1, float_buffer=True)
+            try:
+                default_float_space = reference.colorspace_settings.name
+            finally:
+                bpy.data.images.remove(reference)
+            replace = (previous is None or tuple(previous.size) != (w, h) or not previous.is_float
+                       or previous.colorspace_settings.name != default_float_space)
             image = bpy.data.images.new(image_name, width=w, height=h, alpha=True, float_buffer=True) if replace else previous
             try:
                 image.alpha_mode = "STRAIGHT"
-                # Values are already linear (or untagged UNORM assumed linear).
-                # The OCIO data role avoids a second color-space conversion.
-                image.colorspace_settings.is_data = True
+                # Keep Blender's default float role. Tagging color as data would
+                # bypass display color management as well as input conversion.
                 image.pixels.foreach_set(values)
                 image.update()
             except Exception:

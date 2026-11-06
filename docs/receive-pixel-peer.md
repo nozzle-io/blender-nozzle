@@ -37,19 +37,24 @@ and a native C API observer proves raw UNKNOWN versus resolved BGRA8 before
 Blender receives it. No shared metadata is patched by the test.
 
 The image helper accepts RGBA8/BGRA8 UNORM or sRGB, RGBA16_FLOAT and
-RGBA32_FLOAT. Channel order comes from the mapping, while sRGB transfer comes
-from frame semantic metadata. Byte values are normalized, sRGB RGB is decoded
-once, alpha is unchanged, and half/float values retain their range and float32
+RGBA32_FLOAT. Channel order comes from the mapping; semantic metadata must be
+compatible. All 8-bit color is assumed sRGB-encoded (including untagged UNORM),
+normalized and decoded once. Alpha is only normalized, and half/float values retain their range and float32
 precision. Unsupported layouts/semantic combinations raise before touching the
 previous image. This does not add arbitrary integer/depth/channel expansion.
-UNORM without an sRGB semantic tag is assumed linear, even if a producer put
-encoded values there; there is no heuristic detection. The received image uses
-the active OCIO data role (`colorspace_settings.is_data = True`) to avoid any
-second input color transform. The CI oracle checks that setting, starts with a
-same-size byte image, resizes, and resets an existing image's wrong sRGB setting.
+Untagged linear 8-bit content cannot be distinguished automatically; it is decoded
+under this image-receiver policy. Float input remains linear. The received image
+keeps the active OCIO default float role, never a Non-Color/data tag. A temporary
+1x1 float image supplies the current role without hardcoded OCIO names. The CI
+oracle compares with its own fresh float reference and requires `is_data == False`;
+it starts with a same-size byte image, resizes, and replaces existing images with
+incorrect sRGB or Non-Color settings.
 An attached material image node must keep pointing to the received image through
 byte-to-float upgrades and resizing. Replacement buffers are populated before
 existing users are remapped and the old image is removed.
+The single-frame receive operator catches conversion/native errors, reports an
+ERROR and cancels. Its production `execute` method is exercised with a real R8
+native peer and a captured report callback, not a rendered GUI notification.
 
 The native matrix covers UNORM byte, half and float only: pinned core rejects
 sRGB IOSurface creation. sRGB conversion is supplementary CPU-only evidence,

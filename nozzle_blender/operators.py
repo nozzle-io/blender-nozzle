@@ -94,7 +94,11 @@ class NOZZLE_OT_receive_texture(bpy.types.Operator):
             self.report({"ERROR"}, "Start receiver first")
             return {"CANCELLED"}
 
-        result = engine.receive_to_image(context, props.receiver_handle)
+        try:
+            result = engine.receive_to_image(context, props.receiver_handle)
+        except (ValueError, RuntimeError) as error:
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
         if result:
             self.report({"INFO"}, "Frame received")
         else:

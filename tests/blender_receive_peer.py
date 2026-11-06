@@ -18,8 +18,7 @@ def expected_pixel(kind, x, y):
         return [struct.unpack("=f", struct.pack("=I", bits + x % 19 + y * 23))[0]
                 for bits in (0x3f800001, 0xbf000001, 0x40000001, 0x3f000001)]
     values = [(190+y)/255, (20+x%193)/255, (40+y)/255, (149+x%73)/255]
-    if kind.endswith("SRGB"):
-        values[:3] = [v/12.92 if v <= 0.04045 else ((v+0.055)/1.055)**2.4 for v in values[:3]]
+    values[:3] = [v/12.92 if v <= 0.04045 else ((v+0.055)/1.055)**2.4 for v in values[:3]]
     return values
 
 
@@ -31,10 +30,11 @@ def check_cpu_contract(formats):
         storage = bytes(rgba if order.startswith("RGBA") else (203, 100, 3, 149))
         data = storage + b"padding!"
         result = (data, 1, 1, formats[order], 12)
-        actual = _image_pixels(result, formats["RGBA8_SRGB"])
         expected = [v/255/12.92 if v <= 10 else ((v/255+0.055)/1.055)**2.4 for v in rgba[:3]] + [149/255]
-        if any(not math.isfinite(a) or abs(a-e) > 1e-6 for a, e in zip(actual, expected)):
-            raise AssertionError(f"synthetic sRGB/alpha mismatch {order}: {actual}")
+        for semantic in ("RGBA8_UNORM", "RGBA8_SRGB"):
+            actual = _image_pixels(result, formats[semantic])
+            if any(not math.isfinite(a) or abs(a-e) > 1e-6 for a, e in zip(actual, expected)):
+                raise AssertionError(f"synthetic sRGB/alpha mismatch {order}/{semantic}: {actual}")
     bad = [(b"", 1, 1, formats["RGBA8_UNORM"], 4),
            (b"abcd", 1, 1, formats["RGBA8_UNORM"], 3),
            (b"abcd", 0, 1, formats["RGBA8_UNORM"], 4)]
@@ -67,6 +67,11 @@ def main():
     formats = native.get_format_constants()
     failed = total = 0
     engine = NozzleEngine()
+    reference = bpy.data.images.new("float-role-reference", width=1, height=1, float_buffer=True)
+    default_float_space = reference.colorspace_settings.name
+    if reference.colorspace_settings.is_data:
+        raise AssertionError("default float role unexpectedly uses non-color data")
+    bpy.data.images.remove(reference)
     cases = [(kind, width, bottom) for kind in
              ("RGBA8_UNORM", "BGRA8_UNORM", "RGBA16_FLOAT", "RGBA32_FLOAT")
              for width in (65, 641) for bottom in (0, 1)]
@@ -88,7 +93,10 @@ def main():
         try:
             previous = bpy.data.images.get(engine._receive_image_name)
             if previous is not None:
-                previous.colorspace_settings.name = "sRGB"
+                if total % 2:
+                    previous.colorspace_settings.name = "sRGB"
+                else:
+                    previous.colorspace_settings.is_data = True
             receiver = native.create_receiver(name)
             if not engine.receive_to_image(bpy.context, receiver):
                 raise AssertionError("production receive_to_image returned false")
@@ -108,7 +116,7 @@ def main():
                             raise AssertionError(f"pixel x={x} bottom_row={row} c={c} actual={actual!r} expected={value!r}")
             if not image.is_float:
                 raise AssertionError("received image is not a float buffer")
-            if not image.colorspace_settings.is_data:
+            if image.colorspace_settings.is_data or image.colorspace_settings.name != default_float_space:
                 raise AssertionError(f"unexpected color space: {image.colorspace_settings.name}")
             print(f"BLENDER_IMAGE_PASS {label}", flush=True)
         except Exception as error:
@@ -131,7 +139,8 @@ def main():
         if not engine.receive_to_image(bpy.context, receiver):
             raise AssertionError("external receive returned false")
         image = bpy.data.images[engine._receive_image_name]
-        if not image.is_float or not image.colorspace_settings.is_data or image_node.image != image:
+        if (not image.is_float or image.colorspace_settings.is_data
+                or image.colorspace_settings.name != default_float_space or image_node.image != image):
             raise AssertionError("external receive image contract/user mismatch")
         expected = [v for row in range(3) for x in range(65) for v in expected_pixel("BGRA8_UNORM", x, 2-row)]
         actual = list(image.pixels)
@@ -163,6 +172,26 @@ def main():
             raise AssertionError("unsupported native R8 was accepted")
         if bpy.data.images[engine._receive_image_name] != previous or list(previous.pixels) != previous_pixels:
             raise AssertionError("unsupported format changed previous image")
+        native.destroy_receiver(receiver)
+        receiver = None
+        receiver = native.create_receiver(name)
+        from nozzle_blender import operators
+        reports = []
+        class Reporter:
+            def report(self, levels, message):
+                reports.append((levels, message))
+        props = bpy.context.scene.nozzle_props
+        saved_handle = props.receiver_handle
+        props.receiver_handle = receiver
+        try:
+            outcome = operators.NOZZLE_OT_receive_texture.execute(Reporter(), bpy.context)
+        finally:
+            props.receiver_handle = saved_handle
+        if outcome != {"CANCELLED"} or not any(levels == {"ERROR"} and "unsupported image format" in text for levels, text in reports):
+            raise AssertionError(f"single-frame operator did not report the error: {outcome}, {reports}")
+        if bpy.data.images[engine._receive_image_name] != previous or list(previous.pixels) != previous_pixels:
+            raise AssertionError("operator error changed previous image")
+        print("BLENDER_OPERATOR_PASS real R8 receive reports ERROR and cancels (report callback captured)", flush=True)
         print("BLENDER_IMAGE_PASS unsupported-native-R8 preserves previous image", flush=True)
     finally:
         if receiver is not None:
