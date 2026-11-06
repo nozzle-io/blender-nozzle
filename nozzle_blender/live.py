@@ -149,8 +149,10 @@ def start(context, kind):
             bpy.app.timers.register(_tick, first_interval=_interval)
         if kind == "sender":
             session.area.tag_redraw()
-    except Exception:
+    except Exception as error:
+        setattr(session, f"{kind}_error", f"{kind}: {error}")
         session.stop(kind)
+        session.show_status()
         _remove_empty()
         raise
     return session
@@ -161,6 +163,8 @@ def stop(scene, kind):
     try:
         if session is not None:
             session.stop(kind)
+            setattr(session, f"{kind}_error", "")
+            session.show_status()
     finally:
         _remove_empty()
         if not _sessions and bpy.app.timers.is_registered(_tick):

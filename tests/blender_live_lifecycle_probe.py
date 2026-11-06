@@ -165,7 +165,8 @@ class LifecycleProbe:
                 self.check("waiting_before_producer", self.receiving(), self.props.last_error)
                 self.operator("stop_receiver")
                 self.check("pending_receiver_cancellable", not self.live.has_resources(self.scene, "receiver")
-                           and not self.props.is_receiving and not bpy.app.timers.is_registered(self.live._tick))
+                           and not self.props.is_receiving and not bpy.app.timers.is_registered(self.live._tick)
+                           and self.props.last_error == "", self.props.last_error)
                 self.publish(1)
                 return self.next("cancelled")
             if self.phase == "cancelled":
