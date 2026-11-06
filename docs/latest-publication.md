@@ -7,8 +7,10 @@ The remote tag commit is read back before success is reported.
 
 The git push leases the previously observed tag ref object. A changed tag is
 an error, not permission for a blind overwrite. Main workflow runs serialize
-without automatic cancellation; a stale rerun is rejected against current main
-before release mutation. PR runs remain cancellable.
+without automatic cancellation; a stale rerun prints a skip against current main
+and returns success before release mutation. This avoids marking a valid older
+commit's exact-SHA CI as failed just because a newer commit landed. PR runs remain
+cancellable.
 
 Versioned releases do not move tags. Dry-run dispatches print the verification
 and movement steps without performing them. The release job also requires the

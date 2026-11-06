@@ -72,7 +72,7 @@ class PublishReleaseAssetsTests(unittest.TestCase):
                 return subprocess.CompletedProcess(command, 0, output, "")
 
             with mock.patch.object(publish_release_assets, "run", side_effect=fake_run):
-                if fault:
+                if fault and fault != "stale":
                     with self.assertRaises(SystemExit):
                         publish_release_assets.publish("latest", "latest", paths, args)
                 else:
@@ -97,8 +97,11 @@ class PublishReleaseAssetsTests(unittest.TestCase):
                 if fault == "last_bytes":
                     self.assertEqual(sum(command[:3] == ["gh", "release", "download"] for command in commands), 3)
 
-    def test_latest_rejects_stale_run_before_mutating_release(self) -> None:
-        commands = self.exercise_latest(fault="stale")
+    def test_latest_skips_stale_run_successfully_without_mutation(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            commands = self.exercise_latest(fault="stale")
+        self.assertIn(f"skipped: {'a' * 40} is no longer main", output.getvalue())
         self.assertEqual(commands, [["gh", "api", "repos/nozzle-io/blender-nozzle/commits/main"]])
 
     def test_latest_does_not_suppress_lease_or_readback_failure(self) -> None:

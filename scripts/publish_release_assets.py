@@ -237,7 +237,8 @@ def publish(channel: str, tag: str, paths: list[Path], args: argparse.Namespace)
                     "gh", "api", f"repos/{args.repo}/commits/main",
                 ]).stdout)["sha"]
                 if current_main != args.github_sha:
-                    fail("refusing stale latest publication: workflow commit is no longer main")
+                    print(f"skipped: {args.github_sha} is no longer main; no release mutation")
+                    return
             ensure_release(args.repo, "latest", "blender-nozzle latest", notes_file, True, args.dry_run)
             previous_ref = "" if args.dry_run else latest_ref(args.repo)
             delete_latest_assets(args.repo, args.dry_run)
