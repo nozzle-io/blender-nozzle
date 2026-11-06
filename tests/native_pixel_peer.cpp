@@ -14,13 +14,14 @@ struct resources {
     NozzleFrame *frame = nullptr;
     NozzlePixelMapping *mapping = nullptr;
     bool committed = false;
+    bool owns_sender = true;
     ~resources() {
         nozzle_pixel_mapping_unlock(&mapping);
         if(frame) {
             if(sender && !committed) (void)nozzle_sender_discard_frame(sender, frame);
             nozzle_frame_release(frame);
         }
-        if(sender) nozzle_sender_destroy(sender);
+        if(sender && owns_sender) nozzle_sender_destroy(sender);
         if(receiver) nozzle_receiver_destroy(receiver);
     }
 };
@@ -99,6 +100,51 @@ extern "C" void *blender_peer_publish(const char *name, int width, int height,
 
 extern "C" void blender_peer_destroy(void *sender) {
     nozzle_sender_destroy(static_cast<NozzleSender *>(sender));
+}
+
+extern "C" bool blender_peer_update(void *sender, int offset) {
+    resources peer;
+    peer.sender = static_cast<NozzleSender *>(sender);
+    peer.owns_sender = false;
+    if(!ok(nozzle_sender_acquire_writable_frame(peer.sender, 65, 3, NOZZLE_FORMAT_RGBA8_UNORM,
+        &peer.frame), "live update acquire")) return false;
+    NozzleMappedPixels pixels{};
+    if(!ok(nozzle_frame_lock_writable_pixels_mapping_with_origin(peer.frame, NOZZLE_ORIGIN_TOP_LEFT,
+        &peer.mapping, &pixels), "live update map")) return false;
+    if(pixels.format != NOZZLE_FORMAT_BGRA8_UNORM || !pixels.data || pixels.row_stride_bytes < 65*4) return false;
+    for(int y = 0; y < 3; ++y) {
+        auto *row = static_cast<uint8_t *>(pixels.data) + y*pixels.row_stride_bytes;
+        for(int x = 0; x < 65; ++x) {
+            row[4*x] = 40+y+offset;
+            row[4*x+1] = 20+x%193;
+            row[4*x+2] = 190+y+offset;
+            row[4*x+3] = 149+x%73;
+        }
+    }
+    if(!ok(nozzle_pixel_mapping_unlock_checked(&peer.mapping), "live update unlock") ||
+       !ok(nozzle_sender_commit_frame(peer.sender, peer.frame), "live update commit")) return false;
+    peer.committed = true;
+    return true;
+}
+
+extern "C" bool blender_peer_check_rgba32f(const char *name, int width, int height, const void *expected) {
+    resources peer;
+    NozzleReceiverDesc desc{};
+    desc.name = name;
+    NozzleAcquireDesc acquire{};
+    acquire.timeout_ms = 1000;
+    if(!ok(nozzle_receiver_create(&desc, &peer.receiver), "float observer create") ||
+       !ok(nozzle_receiver_acquire_frame(peer.receiver, &acquire, &peer.frame), "float observer acquire")) return false;
+    NozzleMappedPixels pixels{};
+    if(!ok(nozzle_frame_lock_pixels_mapping_with_origin(peer.frame, NOZZLE_ORIGIN_BOTTOM_LEFT,
+        &peer.mapping, &pixels), "float observer map")) return false;
+    if(pixels.format != NOZZLE_FORMAT_RGBA32_FLOAT || pixels.width != (uint32_t)width ||
+       pixels.height != (uint32_t)height || pixels.origin != NOZZLE_ORIGIN_BOTTOM_LEFT || !pixels.data) return false;
+    for(int y = 0; y < height; ++y) {
+        if(std::memcmp(static_cast<const char *>(pixels.data) + y*pixels.row_stride_bytes,
+                       static_cast<const char *>(expected) + y*width*16, width*16) != 0) return false;
+    }
+    return ok(nozzle_pixel_mapping_unlock_checked(&peer.mapping), "float observer unlock");
 }
 
 namespace {

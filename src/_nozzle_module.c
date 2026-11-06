@@ -115,7 +115,8 @@ static PyObject *py_create_sender(PyObject *self, PyObject *args, PyObject *kwar
     desc.name = name;
     desc.application_name = app_name;
     desc.ring_buffer_size = ring_size;
-    desc.allow_format_fallback = 1;
+    desc.fallback_flags_valid = 1;
+    desc.fallback_flags = NOZZLE_FALLBACK_SAFE_DEFAULTS;
 
     NozzleSender *sender = NULL;
     NozzleErrorCode err = nozzle_sender_create(&desc, &sender);
@@ -287,6 +288,9 @@ static PyObject *py_receiver_acquire_frame(PyObject *self, PyObject *args) {
     NozzleFrame *frame = NULL;
     NozzleErrorCode err = nozzle_receiver_acquire_frame(
         g_handles.receivers[handle], &desc, &frame);
+    if (err == NOZZLE_ERROR_TIMEOUT) {
+        Py_RETURN_NONE;
+    }
     if (err != NOZZLE_OK) {
         return check_error(err);
     }
@@ -572,6 +576,58 @@ static PyObject *py_get_gl_constants(PyObject *self, PyObject *args) {
 
 // --- Module method table ---
 
+static PyObject *py_sender_publish_rgba32f(PyObject *self, PyObject *args) {
+    (void)self;
+    int handle;
+    unsigned int width, height;
+    Py_buffer source;
+    if (!PyArg_ParseTuple(args, "iIIy*", &handle, &width, &height, &source)) return NULL;
+    uint64_t row_bytes = (uint64_t)width * 4 * sizeof(float);
+    if (handle < 0 || handle >= MAX_HANDLES || !g_handles.senders[handle] ||
+        !width || !height || row_bytes > (uint64_t)PY_SSIZE_T_MAX / height ||
+        source.len != (Py_ssize_t)(row_bytes * height)) {
+        PyBuffer_Release(&source);
+        PyErr_SetString(PyExc_ValueError, "invalid sender or packed RGBA32F buffer");
+        return NULL;
+    }
+    NozzleSender *sender = g_handles.senders[handle];
+    NozzleFrame *frame = NULL;
+    NozzlePixelMapping *mapping = NULL;
+    NozzleMappedPixels pixels = {0};
+    NozzleErrorCode err = nozzle_sender_acquire_writable_frame(
+        sender, width, height, NOZZLE_FORMAT_RGBA32_FLOAT, &frame);
+    if (err == NOZZLE_OK) {
+        err = nozzle_frame_lock_writable_pixels_mapping_with_origin(
+            frame, NOZZLE_ORIGIN_BOTTOM_LEFT, &mapping, &pixels);
+    }
+    if (err == NOZZLE_OK) {
+        // Blender texture readback starts at bottom-left; preserve float precision.
+        int64_t stride = pixels.row_stride_bytes;
+        uint64_t magnitude = stride < 0 ? (uint64_t)(-(stride + 1)) + 1 : (uint64_t)stride;
+        if (!pixels.data || pixels.width != width || pixels.height != height ||
+            pixels.format != NOZZLE_FORMAT_RGBA32_FLOAT || pixels.origin != NOZZLE_ORIGIN_BOTTOM_LEFT ||
+            magnitude < row_bytes || magnitude > (uint64_t)PTRDIFF_MAX / height) {
+            err = NOZZLE_ERROR_UNSUPPORTED_FORMAT;
+        } else {
+            for (unsigned int y = 0; y < height; ++y) {
+                memcpy((char *)pixels.data + (ptrdiff_t)y * stride,
+                       (const char *)source.buf + (size_t)y * (size_t)row_bytes, (size_t)row_bytes);
+            }
+        }
+    }
+    if (mapping) {
+        NozzleErrorCode unlock_err = nozzle_pixel_mapping_unlock_checked(&mapping);
+        if (err == NOZZLE_OK) err = unlock_err;
+    }
+    if (err == NOZZLE_OK) err = nozzle_sender_commit_frame(sender, frame);
+    if (frame) {
+        if (err != NOZZLE_OK) (void)nozzle_sender_discard_frame(sender, frame);
+        nozzle_frame_release(frame);
+    }
+    PyBuffer_Release(&source);
+    return check_error(err);
+}
+
 static PyMethodDef nozzle_methods[] = {
     {"create_sender", (PyCFunction)py_create_sender,
      METH_VARARGS | METH_KEYWORDS, "Create a nozzle sender. Returns handle."},
@@ -583,12 +639,14 @@ static PyMethodDef nozzle_methods[] = {
      METH_VARARGS, "Commit a frame to the sender."},
     {"sender_publish_gl_texture", py_sender_publish_gl_texture,
      METH_VARARGS, "Publish a GL texture directly via sender."},
+    {"sender_publish_rgba32f", py_sender_publish_rgba32f,
+     METH_VARARGS, "Publish packed bottom-left scene-linear RGBA32F pixels."},
     {"create_receiver", (PyCFunction)py_create_receiver,
      METH_VARARGS | METH_KEYWORDS, "Create a nozzle receiver. Returns handle."},
     {"destroy_receiver", py_destroy_receiver,
      METH_VARARGS, "Destroy a nozzle receiver by handle."},
     {"receiver_acquire_frame", py_receiver_acquire_frame,
-     METH_VARARGS, "Acquire a frame from receiver. Returns frame handle."},
+     METH_VARARGS, "Acquire a frame from receiver. Returns frame handle, or None on timeout."},
     {"receiver_release_frame", py_receiver_release_frame,
      METH_VARARGS, "Release a frame."},
     {"frame_get_info", py_frame_get_info,

@@ -1,13 +1,8 @@
 import bpy
-from . import _nozzle_native
+from . import live
 from .engine import NozzleEngine
 
 engine = NozzleEngine()
-
-FORMAT = _nozzle_native.get_format_constants()
-GL = _nozzle_native.get_gl_constants()
-GL_TEXTURE_2D = GL["TEXTURE_2D"]
-
 
 class NOZZLE_OT_start_sender(bpy.types.Operator):
     bl_idname = "nozzle.start_sender"
@@ -15,20 +10,17 @@ class NOZZLE_OT_start_sender(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, context):
+        live.reset_scene_state(context.scene)
         props = context.scene.nozzle_props
         if props.sender_handle >= 0:
             return {"CANCELLED"}
 
-        handle = _nozzle_native.create_sender(
-            name=props.sender_name,
-            app_name="Blender",
-            ring_size=3,
-        )
-        props.sender_handle = handle
-        props.is_sending = True
-
-        if context.area:
-            props.timer_handle = context.window_manager.event_timer_add(0.05, window=context.window)
+        try:
+            live.start(context, "sender")
+        except Exception as error:
+            props.last_error = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
 
         self.report({"INFO"}, f"Nozzle sender started: {props.sender_name}")
         return {"FINISHED"}
@@ -41,19 +33,10 @@ class NOZZLE_OT_stop_sender(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.nozzle_props
-        if props.sender_handle < 0:
+        if not live.has_resources(context.scene, "sender"):
             return {"CANCELLED"}
 
-        if props.timer_handle >= 0:
-            context.window_manager.event_timer_remove(
-                context.window_manager.timers[props.timer_handle]
-            )
-            props.timer_handle = -1
-
-        _nozzle_native.destroy_sender(props.sender_handle)
-        props.sender_handle = -1
-        props.is_sending = False
-        engine.stop_sender()
+        live.stop(context.scene, "sender")
 
         self.report({"INFO"}, "Nozzle sender stopped")
         return {"FINISHED"}
@@ -70,16 +53,10 @@ class NOZZLE_OT_send_viewport(bpy.types.Operator):
             self.report({"ERROR"}, "Start sender first")
             return {"CANCELLED"}
 
-        result = engine.capture_and_send(
-            context,
-            props.sender_handle,
-            props.capture_width,
-            props.capture_height,
-        )
-        if result:
-            self.report({"INFO"}, "Frame sent")
-        else:
-            self.report({"WARNING"}, "Failed to send frame")
+        # Capture must run in the viewport draw context, not the sidebar operator.
+        if not live.request_capture(context.scene):
+            return {"CANCELLED"}
+        self.report({"INFO"}, "Viewport capture requested")
         return {"FINISHED"}
 
 
@@ -112,8 +89,9 @@ class NOZZLE_OT_start_receiver(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, context):
+        live.reset_scene_state(context.scene)
         props = context.scene.nozzle_props
-        if props.receiver_handle >= 0:
+        if live.has_resources(context.scene, "receiver"):
             return {"CANCELLED"}
 
         target = props.receiver_target.strip()
@@ -121,12 +99,12 @@ class NOZZLE_OT_start_receiver(bpy.types.Operator):
             self.report({"ERROR"}, "Set a sender name to connect to")
             return {"CANCELLED"}
 
-        handle = _nozzle_native.create_receiver(
-            name=target,
-            app_name="Blender",
-        )
-        props.receiver_handle = handle
-        props.is_receiving = True
+        try:
+            live.start(context, "receiver")
+        except Exception as error:
+            props.last_error = str(error)
+            self.report({"ERROR"}, str(error))
+            return {"CANCELLED"}
 
         self.report({"INFO"}, f"Nozzle receiver started: {target}")
         return {"FINISHED"}
@@ -139,13 +117,10 @@ class NOZZLE_OT_stop_receiver(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.nozzle_props
-        if props.receiver_handle < 0:
+        if not live.has_resources(context.scene, "receiver"):
             return {"CANCELLED"}
 
-        _nozzle_native.destroy_receiver(props.receiver_handle)
-        props.receiver_handle = -1
-        props.is_receiving = False
-        engine.stop_receiver()
+        live.stop(context.scene, "receiver")
 
         self.report({"INFO"}, "Nozzle receiver stopped")
         return {"FINISHED"}
@@ -161,25 +136,6 @@ class NOZZLE_OT_refresh_senders(bpy.types.Operator):
         return {"FINISHED"}
 
 
-class NOZZLE_OT_timer_tick(bpy.types.Operator):
-    bl_idname = "nozzle.timer_tick"
-    bl_label = "Nozzle Timer"
-    bl_options = {"INTERNAL"}
-
-    def execute(self, context):
-        props = context.scene.nozzle_props
-        if props.is_sending and props.sender_handle >= 0:
-            engine.capture_and_send(
-                context,
-                props.sender_handle,
-                props.capture_width,
-                props.capture_height,
-            )
-        if props.is_receiving and props.receiver_handle >= 0:
-            engine.receive_to_image(context, props.receiver_handle)
-        return {"FINISHED"}
-
-
 classes = (
     NOZZLE_OT_start_sender,
     NOZZLE_OT_stop_sender,
@@ -188,15 +144,16 @@ classes = (
     NOZZLE_OT_start_receiver,
     NOZZLE_OT_stop_receiver,
     NOZZLE_OT_refresh_senders,
-    NOZZLE_OT_timer_tick,
 )
 
 
 def register():
     for cls in classes:
         bpy.utils.register_class(cls)
+    live.register()
 
 
 def unregister():
+    live.unregister()
     for cls in reversed(classes):
         bpy.utils.unregister_class(cls)

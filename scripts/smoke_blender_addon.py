@@ -34,6 +34,7 @@ def main() -> None:
 
     import nozzle_blender
     from nozzle_blender import _nozzle_native
+    import numpy
 
     constants = _nozzle_native.get_format_constants()
     if "RGBA8_UNORM" not in constants:
@@ -42,6 +43,7 @@ def main() -> None:
     print(f"NOZZLE_BLENDER_SMOKE_OK zip={zip_path}")
     print(f"NOZZLE_BLENDER_VERSION {bpy.app.version_string}")
     print(f"NOZZLE_PYTHON_VERSION {sys.version.split()[0]}")
+    print(f"NOZZLE_NUMPY_VERSION {numpy.__version__}")
     print(f"NOZZLE_ADDON_MODULE {nozzle_blender.__file__}")
 
 

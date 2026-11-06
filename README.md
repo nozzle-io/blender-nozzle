@@ -5,7 +5,7 @@
 
 Blender addon for GPU texture sharing via [nozzle](https://github.com/nozzle-io/nozzle).
 
-Send Blender viewport renders or receive textures from other nozzle-compatible applications (openFrameworks, Max, etc.) in real-time.
+Send Blender viewport renders or receive textures from other nozzle-compatible applications (openFrameworks, Max, etc.).
 
 ## Disclaimer / Notice
 
@@ -17,11 +17,20 @@ If you encounter problems, please do not become angry; instead, contributions in
 
 ## Status
 
-Early development. Functional sender (GL texture publish) and receiver (pixel copy to Blender image).
+Early development. Live processing uses the Blender UI thread. The sender captures
+scene-linear RGBA32F in a viewport draw callback, reads it back to the CPU, then
+publishes through nozzle. It does not pass a Metal texture as an OpenGL ID and is
+not a zero-copy sender. The receiver copies pixels into a float Blender image.
+The foreground CI probe targets Blender 4.3.2 on macOS Metal; builds/imports on
+other platforms do not establish live viewport interoperability.
+The probe checks changing viewport content and float32 transport, not an exact
+rendered-color/orientation oracle. Exact low-mantissa and row-orientation checks
+cover synthetic float bytes through the native publisher; they do not prove the
+renderer itself preserves arbitrary HDR values. See [live evidence](docs/live-processing.md).
 
 ## Requirements
 
-- Blender 3.0+
+- Blender with its bundled NumPy (the packaged CI target is Blender 4.3.2)
 - macOS 12+ / Windows 10+ / Linux
 - The published Linux x64 build targets **x86-64-v2** (no AVX, AVX2, FMA or F16C). CI sets this explicitly and verifies the binary with `nozzle/scripts/check_x86_64_isa.sh`.
 - CMake 3.20+
@@ -67,11 +76,39 @@ Blender version/platform.
 3. Click **Start Sender**
 4. Other nozzle receivers can now connect using that name
 
+Capture is requested at most every 50 ms after the preceding capture completes,
+not at a guaranteed frame rate. If the original viewport is unavailable after a
+workspace/screen/scene change, sending pauses with a visible status and resumes
+when that viewport returns. Receiving continues independently of the viewport.
+Stop explicitly if the original viewport will not return. Both stop buttons,
+loading another file and disabling the addon release live callbacks/handles.
+Fatal errors stop the affected direction and remain visible in the sidebar and in
+`NOZZLE_LIVE_ERROR` console output. Sender pixel format is RGBA32F, with no
+precision-reducing fallback; receiving applications must support it.
+
 ### Receiver (other apps → Blender)
 
 1. Click **Refresh** to discover available senders
 2. Select a sender and click **Start Receiver**
 3. Received frames appear as `__nozzle_received__` image in Blender
+
+The receiver may also be started before its named sender exists. It keeps
+waiting until the producer appears and reconnects after the producer process
+exits and restarts. Stop Receiver cancels waiting as well as active reception.
+Missing/closed sender states clear when frames return; other errors remain fatal.
+The live receiver requires a scene, not a 3D viewport. Same-process destruction
+and recreation of a producer remains subject to core issue #184; this is not
+covered by the child-process restart guarantee.
+
+Live acquisition does not wait for a new frame (timeout=0); a timeout leaves the
+previous image unchanged. GPU synchronization and pixel mapping can still block;
+this is not a hard real-time/nonblocking guarantee. One scene can own a live
+sender/receiver pair at a time because the output image has a shared name.
+The native `receiver_acquire_frame` now returns `None` on timeout; other failures
+still raise an error. Continuous conversion uses bundled NumPy without installing
+packages. It maintains stride, channel order and float precision; this does not
+remove native readback/copy or Blender image-update costs. Measured conversion
+and full receive timings are recorded separately by the foreground CI probe.
 
 The receive image uses a float buffer: RGBA8/BGRA8 color is normalized and
 decoded from sRGB, and RGBA16F/RGBA32F retain negative/HDR values without byte quantization.
@@ -100,6 +137,7 @@ interoperability evidence.
 nozzle_blender/         Blender addon (Python)
   ├── __init__.py       Registration, bl_info
   ├── operators.py      Send/Receive operators
+  ├── live.py           Callback and native handle ownership
   ├── properties.py     Addon properties
   ├── panels.py         UI panels (View3D sidebar)
   └── engine.py         Texture capture & receive logic
