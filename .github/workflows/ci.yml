@@ -369,6 +369,28 @@ jobs:
             --python tests/blender_receive_peer.py -- \
             "${zips[0]}" build-blender/libblender_pixel_peer.dylib
 
+      - name: Probe real Blender live operators
+        env:
+          BLENDER_USER_CONFIG: ${{ runner.temp }}/blender-live-config
+          BLENDER_USER_SCRIPTS: ${{ runner.temp }}/blender-live-scripts
+        run: |
+          set -euo pipefail
+          zips=(dist/blender-nozzle-*.zip)
+          test "${#zips[@]}" = 1
+          python3 scripts/run_with_timeout.py 120 -- \
+            /tmp/blender-dmg/Blender.app/Contents/MacOS/Blender \
+            --factory-startup --python-exit-code 1 \
+            --python tests/blender_live_probe.py -- \
+            "${zips[0]}" build-blender/libblender_pixel_peer.dylib
+
+      - name: Upload live operator evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: blender-live-operator-evidence
+          path: artifacts/blender-live-probe.json
+          if-no-files-found: warn
+
       - uses: actions/upload-artifact@v4
         with:
           name: blender-nozzle-package-macos-arm64
