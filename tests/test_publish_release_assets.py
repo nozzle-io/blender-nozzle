@@ -24,8 +24,10 @@ class PublishReleaseAssetsTests(unittest.TestCase):
         commands: list[list[str]] = []
         notes = ""
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / "blender-nozzle-latest-aaaaaaa-blender4.3-macos-arm64-py311.zip"
-            path.write_bytes(b"exact local package")
+            paths = [Path(tmp) / f"blender-nozzle-latest-aaaaaaa-blender4.3-{platform}-py311.zip"
+                     for platform in publish_release_assets.PLATFORMS]
+            for path in paths:
+                path.write_bytes(f"exact local package: {path.name}".encode())
             args = argparse.Namespace(repo="nozzle-io/blender-nozzle", github_sha=target,
                                       blender_version="4.3.2", blender_series="4.3",
                                       pyabi="py311", dry_run=dry_run)
@@ -36,7 +38,7 @@ class PublishReleaseAssetsTests(unittest.TestCase):
                 output = ""
                 if command[:3] == ["gh", "release", "view"]:
                     if "body,assets" in command:
-                        assets = [] if fault == "missing_asset" else [{"name": path.name}]
+                        assets = [] if fault == "missing_asset" else [{"name": path.name} for path in paths]
                         output = json.dumps({"body": "concurrent notes" if fault == "notes" else notes,
                                              "assets": assets})
                     elif "assets" in command:
@@ -47,7 +49,9 @@ class PublishReleaseAssetsTests(unittest.TestCase):
                     if fault == "upload":
                         raise SystemExit(9)
                 elif command[:3] == ["gh", "release", "download"]:
-                    data = b"wrong uploaded bytes" if fault == "bytes" else path.read_bytes()
+                    path = next(path for path in paths if path.name == command[command.index("--pattern") + 1])
+                    wrong = fault == "bytes" or (fault == "last_bytes" and path == paths[-1])
+                    data = b"wrong uploaded bytes" if wrong else path.read_bytes()
                     (Path(command[command.index("--dir") + 1]) / path.name).write_bytes(data)
                 elif command[:2] == ["gh", "api"]:
                     if command[2].endswith("/git/ref/tags/latest"):
@@ -70,25 +74,28 @@ class PublishReleaseAssetsTests(unittest.TestCase):
             with mock.patch.object(publish_release_assets, "run", side_effect=fake_run):
                 if fault:
                     with self.assertRaises(SystemExit):
-                        publish_release_assets.publish("latest", "latest", [path], args)
+                        publish_release_assets.publish("latest", "latest", paths, args)
                 else:
-                    publish_release_assets.publish("latest", "latest", [path], args)
+                    publish_release_assets.publish("latest", "latest", paths, args)
         return commands
 
     def test_latest_moves_only_after_uploaded_bytes_are_verified(self) -> None:
         commands = self.exercise_latest()
         upload = next(i for i, command in enumerate(commands) if command[:3] == ["gh", "release", "upload"])
-        download = next(i for i, command in enumerate(commands) if command[:3] == ["gh", "release", "download"])
+        downloads = [i for i, command in enumerate(commands) if command[:3] == ["gh", "release", "download"]]
         push = next(i for i, command in enumerate(commands) if command[:2] == ["git", "push"])
-        self.assertLess(upload, download)
-        self.assertLess(download, push)
+        self.assertEqual(len(downloads), 3)
+        self.assertLess(upload, min(downloads))
+        self.assertLess(max(downloads), push)
         self.assertEqual(commands[-1], ["gh", "api", "repos/nozzle-io/blender-nozzle/commits/latest"])
 
     def test_latest_does_not_move_on_upload_or_verification_failure(self) -> None:
-        for fault in ["upload", "missing_asset", "notes", "bytes"]:
+        for fault in ["upload", "missing_asset", "notes", "bytes", "last_bytes"]:
             with self.subTest(fault=fault):
                 commands = self.exercise_latest(fault=fault)
                 self.assertFalse(any(command[:2] == ["git", "push"] for command in commands))
+                if fault == "last_bytes":
+                    self.assertEqual(sum(command[:3] == ["gh", "release", "download"] for command in commands), 3)
 
     def test_latest_rejects_stale_run_before_mutating_release(self) -> None:
         commands = self.exercise_latest(fault="stale")
