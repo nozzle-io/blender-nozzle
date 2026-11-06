@@ -5,6 +5,9 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
+import json
+import re
 import shutil
 import subprocess
 import sys
@@ -171,6 +174,54 @@ def upload_assets(repo: str, tag: str, paths: list[Path], dry_run: bool) -> None
     run(["gh", "release", "upload", tag, "--repo", repo, *[str(path) for path in paths]])
 
 
+def latest_ref(repo: str) -> str:
+    result = run(["gh", "api", f"repos/{repo}/git/ref/tags/latest"])
+    sha = json.loads(result.stdout)["object"]["sha"]
+    if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):
+        fail("latest ref has no valid object SHA")
+    return sha
+
+
+def verify_latest_assets(repo: str, paths: list[Path], notes: str, dry_run: bool) -> None:
+    if dry_run:
+        print("dry-run: would verify uploaded latest notes, asset names and SHA256 bytes")
+        return
+    release = json.loads(run([
+        "gh", "release", "view", "latest", "--repo", repo, "--json", "body,assets",
+    ]).stdout)
+    if release["body"].strip() != notes.strip():
+        fail("latest release notes changed during publication")
+    expected = {path.name for path in paths}
+    actual = {asset["name"] for asset in release["assets"]
+              if fnmatch.fnmatch(asset["name"], "blender-nozzle-latest-*.zip")}
+    if actual != expected:
+        fail("published latest asset set does not match the local packages")
+    with tempfile.TemporaryDirectory() as tmp:
+        for path in paths:
+            run(["gh", "release", "download", "latest", "--repo", repo,
+                 "--pattern", path.name, "--dir", tmp])
+            downloaded = Path(tmp) / path.name
+            if not downloaded.is_file():
+                fail(f"published asset missing after download: {path.name}")
+            digest = hashlib.sha256(downloaded.read_bytes()).hexdigest()
+            if digest != hashlib.sha256(path.read_bytes()).hexdigest():
+                fail(f"published asset SHA256 mismatch: {path.name}")
+            print(f"verified latest asset {path.name} sha256={digest}")
+
+
+def move_latest_tag(repo: str, sha: str, previous_ref: str, dry_run: bool) -> None:
+    if dry_run:
+        print(f"dry-run: would move only latest to {sha} after uploaded asset verification")
+        return
+    # Lease the raw ref object, not a peeled annotated tag's commit.
+    run(["git", "push", f"--force-with-lease=refs/tags/latest:{previous_ref}",
+         f"https://github.com/{repo}.git", f"{sha}:refs/tags/latest"])
+    resolved = json.loads(run(["gh", "api", f"repos/{repo}/commits/latest"]).stdout)["sha"]
+    if resolved != sha:
+        fail(f"latest tag readback mismatch: expected {sha}, got {resolved}")
+    print(f"verified latest tag commit={sha}")
+
+
 def publish(channel: str, tag: str, paths: list[Path], args: argparse.Namespace) -> None:
     asset_names = [path.name for path in paths]
     with tempfile.TemporaryDirectory() as tmp:
@@ -179,9 +230,21 @@ def publish(channel: str, tag: str, paths: list[Path], args: argparse.Namespace)
         print(notes_file.read_text(encoding="utf-8"))
 
         if channel == "latest":
+            if not re.fullmatch(r"[0-9a-f]{40}", args.github_sha):
+                fail("latest publication requires a full 40-character commit SHA")
+            if not args.dry_run:
+                current_main = json.loads(run([
+                    "gh", "api", f"repos/{args.repo}/commits/main",
+                ]).stdout)["sha"]
+                if current_main != args.github_sha:
+                    print(f"skipped: {args.github_sha} is no longer main; no release mutation")
+                    return
             ensure_release(args.repo, "latest", "blender-nozzle latest", notes_file, True, args.dry_run)
+            previous_ref = "" if args.dry_run else latest_ref(args.repo)
             delete_latest_assets(args.repo, args.dry_run)
             upload_assets(args.repo, "latest", paths, args.dry_run)
+            verify_latest_assets(args.repo, paths, notes_file.read_text(encoding="utf-8"), args.dry_run)
+            move_latest_tag(args.repo, args.github_sha, previous_ref, args.dry_run)
             return
 
         existing = release_assets(args.repo, tag)

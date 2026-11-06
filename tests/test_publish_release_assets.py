@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import contextlib
+import argparse
 import io
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -15,6 +18,103 @@ import publish_release_assets  # noqa: E402
 
 
 class PublishReleaseAssetsTests(unittest.TestCase):
+    def exercise_latest(self, *, fault: str = "", dry_run: bool = False) -> list[list[str]]:
+        target = "a" * 40
+        old_ref = "b" * 40
+        commands: list[list[str]] = []
+        notes = ""
+        with tempfile.TemporaryDirectory() as tmp:
+            paths = [Path(tmp) / f"blender-nozzle-latest-aaaaaaa-blender4.3-{platform}-py311.zip"
+                     for platform in publish_release_assets.PLATFORMS]
+            for path in paths:
+                path.write_bytes(f"exact local package: {path.name}".encode())
+            args = argparse.Namespace(repo="nozzle-io/blender-nozzle", github_sha=target,
+                                      blender_version="4.3.2", blender_series="4.3",
+                                      pyabi="py311", dry_run=dry_run)
+
+            def fake_run(command: list[str], *, check: bool = True):
+                nonlocal notes
+                commands.append(command)
+                output = ""
+                if command[:3] == ["gh", "release", "view"]:
+                    if "body,assets" in command:
+                        assets = [] if fault == "missing_asset" else [{"name": path.name} for path in paths]
+                        output = json.dumps({"body": "concurrent notes" if fault == "notes" else notes,
+                                             "assets": assets})
+                    elif "assets" in command:
+                        output = ""
+                elif command[:3] == ["gh", "release", "edit"]:
+                    notes = Path(command[command.index("--notes-file") + 1]).read_text()
+                elif command[:3] == ["gh", "release", "upload"]:
+                    if fault == "upload":
+                        raise SystemExit(9)
+                elif command[:3] == ["gh", "release", "download"]:
+                    path = next(path for path in paths if path.name == command[command.index("--pattern") + 1])
+                    wrong = fault == "bytes" or (fault == "last_bytes" and path == paths[-1])
+                    data = b"wrong uploaded bytes" if wrong else path.read_bytes()
+                    (Path(command[command.index("--dir") + 1]) / path.name).write_bytes(data)
+                elif command[:2] == ["gh", "api"]:
+                    if command[2].endswith("/git/ref/tags/latest"):
+                        output = json.dumps({"object": {"sha": old_ref}})
+                    elif command[2].endswith("/commits/latest"):
+                        output = json.dumps({"sha": old_ref if fault == "readback" else target})
+                    elif command[2].endswith("/commits/main"):
+                        output = json.dumps({"sha": old_ref if fault == "stale" else target})
+                    else:
+                        self.fail(f"Unexpected API request: {command}")
+                elif command[:2] == ["git", "push"]:
+                    self.assertIn(f"--force-with-lease=refs/tags/latest:{old_ref}", command)
+                    self.assertEqual(command[-1], f"{target}:refs/tags/latest")
+                    if fault == "lease":
+                        raise SystemExit(1)
+                else:
+                    self.fail(f"Unexpected command: {command}")
+                return subprocess.CompletedProcess(command, 0, output, "")
+
+            with mock.patch.object(publish_release_assets, "run", side_effect=fake_run):
+                if fault and fault != "stale":
+                    with self.assertRaises(SystemExit):
+                        publish_release_assets.publish("latest", "latest", paths, args)
+                else:
+                    publish_release_assets.publish("latest", "latest", paths, args)
+        return commands
+
+    def test_latest_moves_only_after_uploaded_bytes_are_verified(self) -> None:
+        commands = self.exercise_latest()
+        upload = next(i for i, command in enumerate(commands) if command[:3] == ["gh", "release", "upload"])
+        downloads = [i for i, command in enumerate(commands) if command[:3] == ["gh", "release", "download"]]
+        push = next(i for i, command in enumerate(commands) if command[:2] == ["git", "push"])
+        self.assertEqual(len(downloads), 3)
+        self.assertLess(upload, min(downloads))
+        self.assertLess(max(downloads), push)
+        self.assertEqual(commands[-1], ["gh", "api", "repos/nozzle-io/blender-nozzle/commits/latest"])
+
+    def test_latest_does_not_move_on_upload_or_verification_failure(self) -> None:
+        for fault in ["upload", "missing_asset", "notes", "bytes", "last_bytes"]:
+            with self.subTest(fault=fault):
+                commands = self.exercise_latest(fault=fault)
+                self.assertFalse(any(command[:2] == ["git", "push"] for command in commands))
+                if fault == "last_bytes":
+                    self.assertEqual(sum(command[:3] == ["gh", "release", "download"] for command in commands), 3)
+
+    def test_latest_skips_stale_run_successfully_without_mutation(self) -> None:
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            commands = self.exercise_latest(fault="stale")
+        self.assertIn(f"skipped: {'a' * 40} is no longer main", output.getvalue())
+        self.assertEqual(commands, [["gh", "api", "repos/nozzle-io/blender-nozzle/commits/main"]])
+
+    def test_latest_does_not_suppress_lease_or_readback_failure(self) -> None:
+        for fault in ["lease", "readback"]:
+            with self.subTest(fault=fault):
+                commands = self.exercise_latest(fault=fault)
+                self.assertEqual(sum(command[:2] == ["git", "push"] for command in commands), 1)
+
+    def test_latest_dry_run_never_pushes_or_mutates_release(self) -> None:
+        commands = self.exercise_latest(dry_run=True)
+        self.assertTrue(commands)
+        self.assertTrue(all(command[:3] == ["gh", "release", "view"] for command in commands))
+
     def run_main(self, args: list[str]) -> tuple[int, str, str]:
         stdout = io.StringIO()
         stderr = io.StringIO()
