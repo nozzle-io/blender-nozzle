@@ -385,12 +385,26 @@ jobs:
             --python tests/blender_live_probe.py -- \
             "${zips[0]}" build-blender/libblender_pixel_peer.dylib
 
+      - name: Blender live availability and workspace regression
+        env:
+          BLENDER_USER_CONFIG: ${{ runner.temp }}/blender-lifecycle-config
+          BLENDER_USER_SCRIPTS: ${{ runner.temp }}/blender-lifecycle-scripts
+        run: |
+          set -euo pipefail
+          zips=(dist/blender-nozzle-*.zip)
+          test "${#zips[@]}" = 1
+          python3 scripts/run_with_timeout.py 120 -- \
+            /tmp/blender-dmg/Blender.app/Contents/MacOS/Blender \
+            --factory-startup --python-exit-code 1 \
+            --python tests/blender_live_lifecycle_probe.py -- \
+            "${zips[0]}" build-blender/libblender_pixel_peer.dylib "$(command -v python3)"
+
       - name: Upload live operator evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: blender-live-operator-evidence
-          path: artifacts/blender-live-probe.json
+          path: artifacts/blender-live-*.json
           if-no-files-found: warn
 
       - uses: actions/upload-artifact@v4
