@@ -31,28 +31,28 @@ class NozzleProperties(bpy.types.PropertyGroup):
     is_sending: bpy.props.BoolProperty(
         name="Sending",
         default=False,
-        options={"HIDDEN"},
+        options={"HIDDEN", "SKIP_SAVE"},
     )
 
     is_receiving: bpy.props.BoolProperty(
         name="Receiving",
         default=False,
-        options={"HIDDEN"},
+        options={"HIDDEN", "SKIP_SAVE"},
     )
 
     sender_handle: bpy.props.IntProperty(
         default=-1,
-        options={"HIDDEN"},
+        options={"HIDDEN", "SKIP_SAVE"},
     )
 
     receiver_handle: bpy.props.IntProperty(
         default=-1,
-        options={"HIDDEN"},
+        options={"HIDDEN", "SKIP_SAVE"},
     )
 
-    timer_handle: bpy.props.IntProperty(
-        default=-1,
-        options={"HIDDEN"},
+    last_error: bpy.props.StringProperty(
+        default="",
+        options={"HIDDEN", "SKIP_SAVE"},
     )
 
     available_senders: bpy.props.EnumProperty(

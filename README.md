@@ -5,7 +5,7 @@
 
 Blender addon for GPU texture sharing via [nozzle](https://github.com/nozzle-io/nozzle).
 
-Send Blender viewport renders or receive textures from other nozzle-compatible applications (openFrameworks, Max, etc.) in real-time.
+Send Blender viewport renders or receive textures from other nozzle-compatible applications (openFrameworks, Max, etc.).
 
 ## Disclaimer / Notice
 
@@ -17,11 +17,16 @@ If you encounter problems, please do not become angry; instead, contributions in
 
 ## Status
 
-Early development. Functional sender (GL texture publish) and receiver (pixel copy to Blender image).
+Early development. Live processing uses the Blender UI thread. The sender captures
+scene-linear RGBA32F in a viewport draw callback, reads it back to the CPU, then
+publishes through nozzle. It does not pass a Metal texture as an OpenGL ID and is
+not a zero-copy sender. The receiver copies pixels into a float Blender image.
+The foreground CI probe targets Blender 4.3.2 on macOS Metal; builds/imports on
+other platforms do not establish live viewport interoperability.
 
 ## Requirements
 
-- Blender 3.0+
+- Blender with its bundled NumPy (the packaged CI target is Blender 4.3.2)
 - macOS 12+ / Windows 10+ / Linux
 - The published Linux x64 build targets **x86-64-v2** (no AVX, AVX2, FMA or F16C). CI sets this explicitly and verifies the binary with `nozzle/scripts/check_x86_64_isa.sh`.
 - CMake 3.20+
@@ -67,11 +72,26 @@ Blender version/platform.
 3. Click **Start Sender**
 4. Other nozzle receivers can now connect using that name
 
+Keep the original 3D viewport open. Capture is requested at most every 50 ms,
+after the preceding capture completes, not at a guaranteed frame rate. Closing
+that viewport or switching its scene stops its live session. Both stop buttons,
+loading another file and disabling the addon release live callbacks/handles.
+Errors stop the affected direction and remain visible in the sidebar and in
+`NOZZLE_LIVE_ERROR` console output. Sender pixel format is RGBA32F, with no
+precision-reducing fallback; receiving applications must support it.
+
 ### Receiver (other apps → Blender)
 
 1. Click **Refresh** to discover available senders
 2. Select a sender and click **Start Receiver**
 3. Received frames appear as `__nozzle_received__` image in Blender
+
+Live acquisition is nonblocking; a timeout leaves the previous image unchanged.
+The native `receiver_acquire_frame` now returns `None` on timeout; other failures
+still raise an error. Continuous conversion uses bundled NumPy without installing
+packages. It maintains stride, channel order and float precision; this does not
+remove native readback/copy or Blender image-update costs. Measured conversion
+and full receive timings are recorded separately by the foreground CI probe.
 
 The receive image uses a float buffer: RGBA8/BGRA8 color is normalized and
 decoded from sRGB, and RGBA16F/RGBA32F retain negative/HDR values without byte quantization.
@@ -100,6 +120,7 @@ interoperability evidence.
 nozzle_blender/         Blender addon (Python)
   ├── __init__.py       Registration, bl_info
   ├── operators.py      Send/Receive operators
+  ├── live.py           Callback and native handle ownership
   ├── properties.py     Addon properties
   ├── panels.py         UI panels (View3D sidebar)
   └── engine.py         Texture capture & receive logic

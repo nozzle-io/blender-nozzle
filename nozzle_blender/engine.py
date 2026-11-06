@@ -1,44 +1,40 @@
 import bpy
 import gpu
-import struct
-from array import array
+import numpy as np
 from . import _nozzle_native
 
 FORMAT = _nozzle_native.get_format_constants()
-GL = _nozzle_native.get_gl_constants()
-GL_TEXTURE_2D = GL["TEXTURE_2D"]
-
-NOZZLE_FORMAT_RGBA8_UNORM = FORMAT["RGBA8_UNORM"]
+_SRGB = np.array([v/255/12.92 if v <= 10 else ((v/255+0.055)/1.055)**2.4
+                  for v in range(256)], dtype=np.float32)
+_ALPHA = np.arange(256, dtype=np.float32) / 255.0
 
 
 def _image_pixels(result, semantic_format):
     data, width, height, storage_format, stride = result
     byte_formats = {FORMAT[key] for key in ("RGBA8_UNORM", "BGRA8_UNORM", "RGBA8_SRGB", "BGRA8_SRGB")}
     if storage_format in byte_formats and semantic_format in byte_formats:
-        pixel = struct.Struct("=4B")
+        dtype = np.dtype("u1")
     elif storage_format == semantic_format == FORMAT["RGBA16_FLOAT"]:
-        pixel = struct.Struct("=4e")
+        dtype = np.dtype("=f2")
     elif storage_format == semantic_format == FORMAT["RGBA32_FLOAT"]:
-        pixel = struct.Struct("=4f")
+        dtype = np.dtype("=f4")
     else:
         raise ValueError(f"unsupported image format: storage={storage_format}, semantic={semantic_format}")
-    if width <= 0 or height <= 0 or stride < width * pixel.size or len(data) < (height-1)*stride + width*pixel.size:
+    pixel_size = 4 * dtype.itemsize
+    if width <= 0 or height <= 0 or stride < width * pixel_size or len(data) < (height-1)*stride + width*pixel_size:
         raise ValueError("invalid owned pixel layout")
     bgra = storage_format in {FORMAT["BGRA8_UNORM"], FORMAT["BGRA8_SRGB"]}
-    values = array("f")
-    # Native copy is top-down; Blender Image.pixels is bottom-up RGBA float.
-    for y in range(height-1, -1, -1):
-        for x in range(width):
-            rgba = pixel.unpack_from(data, y*stride + x*pixel.size)
-            if storage_format in byte_formats:
-                rgba = [value / 255.0 for value in rgba]
-                if bgra:
-                    rgba[0], rgba[2] = rgba[2], rgba[0]
-                # This image receiver assumes untagged byte color is encoded
-                # sRGB too. Float input is already scene linear.
-                rgba[:3] = [v/12.92 if v <= 0.04045 else ((v+0.055)/1.055)**2.4 for v in rgba[:3]]
-            values.extend(rgba)
-    return values
+    # The view skips row padding; the result is owned, packed bottom-up RGBA.
+    source = np.ndarray((height, width, 4), dtype=dtype, buffer=data,
+                        strides=(stride, pixel_size, dtype.itemsize))[::-1]
+    values = np.empty((height, width, 4), dtype=np.float32)
+    if storage_format in byte_formats:
+        for dst, src in enumerate((2, 1, 0) if bgra else (0, 1, 2)):
+            np.take(_SRGB, source[:, :, src], out=values[:, :, dst])
+        np.take(_ALPHA, source[:, :, 3], out=values[:, :, 3])
+    else:
+        np.copyto(values, source)
+    return values.reshape(-1)
 
 
 class NozzleEngine:
@@ -56,38 +52,33 @@ class NozzleEngine:
         if self._offscreen and self._offscreen.width == width and self._offscreen.height == height:
             return
         self._free_offscreen()
-        self._offscreen = gpu.types.GPUOffScreen(width, height)
+        self._offscreen = gpu.types.GPUOffScreen(width, height, format="RGBA32F")
 
     def _free_offscreen(self):
         if self._offscreen:
-            self._offscreen.free()
+            offscreen = self._offscreen
             self._offscreen = None
+            offscreen.free()
 
     def capture_and_send(self, context, sender_handle, width, height):
         self._ensure_offscreen(width, height)
 
-        view_layer = context.view_layer
         self._offscreen.draw_view3d(
             context.scene,
-            context.region,
+            context.view_layer,
             context.space_data,
-            view_layer,
-            context.depsgraph,
+            context.region,
+            context.region_data.view_matrix,
+            context.region_data.window_matrix,
+            do_color_management=False,
         )
-
-        color_tex = self._offscreen.color_texture
-        _nozzle_native.sender_publish_gl_texture(
-            sender_handle,
-            color_tex,
-            GL_TEXTURE_2D,
-            width,
-            height,
-            NOZZLE_FORMAT_RGBA8_UNORM,
-        )
+        pixels = self._offscreen.texture_color.read()
+        values = np.asarray(pixels, dtype=np.float32)
+        _nozzle_native.sender_publish_rgba32f(sender_handle, width, height, values.tobytes())
         return True
 
-    def receive_to_image(self, context, receiver_handle):
-        frame_handle = _nozzle_native.receiver_acquire_frame(receiver_handle, 100)
+    def receive_to_image(self, context, receiver_handle, timeout_ms=100):
+        frame_handle = _nozzle_native.receiver_acquire_frame(receiver_handle, timeout_ms)
         if frame_handle is None:
             return False
 

@@ -12,12 +12,15 @@ class NOZZLE_PT_sender(bpy.types.Panel):
         layout = self.layout
         props = context.scene.nozzle_props
 
+        if props.last_error:
+            layout.label(text=props.last_error, icon="ERROR")
+
         if props.is_sending:
             layout.prop(props, "sender_name")
             row = layout.row()
             row.prop(props, "capture_width")
             row.prop(props, "capture_height")
-            layout.operator("nozzle.send_viewport", text="Send Single Frame")
+            layout.operator("nozzle.send_viewport", text="Capture Now")
             layout.operator("nozzle.stop_sender", text="Stop Sender", icon="X")
         else:
             layout.prop(props, "sender_name")
@@ -37,6 +40,9 @@ class NOZZLE_PT_receiver(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         props = context.scene.nozzle_props
+
+        if props.last_error:
+            layout.label(text=props.last_error, icon="ERROR")
 
         if props.is_receiving:
             layout.label(text=f"Connected to: {props.receiver_target}")
