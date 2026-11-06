@@ -211,6 +211,8 @@ def _tick():
 
 @persistent
 def shutdown(_unused=None):
+    if bpy.app.timers.is_registered(reset_state):
+        bpy.app.timers.unregister(reset_state)
     if bpy.app.timers.is_registered(_tick):
         bpy.app.timers.unregister(_tick)
     errors = []
@@ -222,7 +224,8 @@ def shutdown(_unused=None):
 
 
 def register():
-    reset_state()
+    # Blender restricts bpy.data during addon registration.
+    bpy.app.timers.register(reset_state, first_interval=0.0)
     if shutdown not in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.append(shutdown)
     if reset_state not in bpy.app.handlers.load_post:
@@ -241,6 +244,11 @@ def unregister():
 def reset_state(_unused=None):
     # Older .blend files may contain saved native IDs, which are not resources.
     for scene in bpy.data.scenes:
+        reset_scene_state(scene)
+
+
+def reset_scene_state(scene):
+    if scene.as_pointer() not in _sessions:
         props = scene.nozzle_props
         props.sender_handle = props.receiver_handle = -1
         props.is_sending = props.is_receiving = False

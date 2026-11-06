@@ -10,6 +10,7 @@ class NOZZLE_OT_start_sender(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, context):
+        live.reset_scene_state(context.scene)
         props = context.scene.nozzle_props
         if props.sender_handle >= 0:
             return {"CANCELLED"}
@@ -88,6 +89,7 @@ class NOZZLE_OT_start_receiver(bpy.types.Operator):
     bl_options = {"REGISTER"}
 
     def execute(self, context):
+        live.reset_scene_state(context.scene)
         props = context.scene.nozzle_props
         if props.receiver_handle >= 0:
             return {"CANCELLED"}

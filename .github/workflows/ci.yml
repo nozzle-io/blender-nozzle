@@ -242,6 +242,7 @@ jobs:
           timeout 180s xvfb-run -a /tmp/blender/blender \
             --background \
             --factory-startup \
+            --python-exit-code 1 \
             --python scripts/smoke_blender_addon.py \
             -- "$zip_path"
 
@@ -351,6 +352,7 @@ jobs:
             /tmp/blender-dmg/Blender.app/Contents/MacOS/Blender \
             --background \
             --factory-startup \
+            --python-exit-code 1 \
             --python scripts/smoke_blender_addon.py \
             -- "$zip_path"
 
@@ -498,6 +500,7 @@ jobs:
             $env:BLENDER_EXE `
             --background `
             --factory-startup `
+            --python-exit-code 1 `
             --python scripts/smoke_blender_addon.py `
             -- $zipPath
 
