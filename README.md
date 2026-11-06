@@ -23,6 +23,10 @@ publishes through nozzle. It does not pass a Metal texture as an OpenGL ID and i
 not a zero-copy sender. The receiver copies pixels into a float Blender image.
 The foreground CI probe targets Blender 4.3.2 on macOS Metal; builds/imports on
 other platforms do not establish live viewport interoperability.
+The probe checks changing viewport content and float32 transport, not an exact
+rendered-color/orientation oracle. Exact low-mantissa and row-orientation checks
+cover synthetic float bytes through the native publisher; they do not prove the
+renderer itself preserves arbitrary HDR values. See [live evidence](docs/live-processing.md).
 
 ## Requirements
 
@@ -86,7 +90,10 @@ precision-reducing fallback; receiving applications must support it.
 2. Select a sender and click **Start Receiver**
 3. Received frames appear as `__nozzle_received__` image in Blender
 
-Live acquisition is nonblocking; a timeout leaves the previous image unchanged.
+Live acquisition does not wait for a new frame (timeout=0); a timeout leaves the
+previous image unchanged. GPU synchronization and pixel mapping can still block;
+this is not a hard real-time/nonblocking guarantee. One scene can own a live
+sender/receiver pair at a time because the output image has a shared name.
 The native `receiver_acquire_frame` now returns `None` on timeout; other failures
 still raise an error. Continuous conversion uses bundled NumPy without installing
 packages. It maintains stride, channel order and float precision; this does not

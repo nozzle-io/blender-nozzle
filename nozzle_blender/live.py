@@ -40,26 +40,37 @@ class Session:
             return False
 
     def stop(self, kind):
-        try:
-            if kind == "sender":
-                if self.draw_handle is not None:
+        errors = []
+        if kind == "sender":
+            if self.draw_handle is not None:
+                try:
                     bpy.types.SpaceView3D.draw_handler_remove(self.draw_handle, "WINDOW")
                     self.draw_handle = None
+                except Exception as error:
+                    errors.append(str(error))
+            try:
                 self.engine.stop_sender()
-        finally:
-            handle = getattr(self, kind)
-            if handle is not None:
+            except Exception as error:
+                errors.append(str(error))
+        handle = getattr(self, kind)
+        if handle is not None:
+            try:
                 getattr(native, f"destroy_{kind}")(handle)
                 setattr(self, kind, None)
-            try:
-                props = self.scene.nozzle_props
-                setattr(props, f"{kind}_handle", -1)
-                setattr(props, "is_sending" if kind == "sender" else "is_receiving", False)
-            except ReferenceError:
-                pass
+            except Exception as error:
+                errors.append(str(error))
+        try:
+            props = self.scene.nozzle_props
+            remaining = getattr(self, kind)
+            setattr(props, f"{kind}_handle", remaining if remaining is not None else -1)
+            setattr(props, "is_sending" if kind == "sender" else "is_receiving", remaining is not None)
+        except ReferenceError:
+            pass
+        if errors:
+            raise RuntimeError("; ".join(errors))
 
     def draw(self):
-        if (self.sender is None or self.drawing or self.pending_error is not None
+        if (self.sender is None or self.drawing or self.pending_error is not None or not self.valid()
                 or bpy.context.window != self.window or bpy.context.area != self.area
                 or bpy.context.region != self.region or time.perf_counter() < self.next_send):
             return
@@ -82,6 +93,8 @@ def start(context, kind):
     if context.area is None or context.window is None:
         raise RuntimeError("a live 3D viewport window is required")
     key = context.scene.as_pointer()
+    if _sessions and key not in _sessions:
+        raise RuntimeError("stop the existing live scene before starting another")
     session = _sessions.get(key)
     if session is None:
         session = Session(context)
@@ -111,11 +124,13 @@ def start(context, kind):
 
 def stop(scene, kind):
     session = _sessions.get(scene.as_pointer())
-    if session is not None:
-        session.stop(kind)
-    _remove_empty()
-    if not _sessions and bpy.app.timers.is_registered(_tick):
-        bpy.app.timers.unregister(_tick)
+    try:
+        if session is not None:
+            session.stop(kind)
+    finally:
+        _remove_empty()
+        if not _sessions and bpy.app.timers.is_registered(_tick):
+            bpy.app.timers.unregister(_tick)
 
 
 def request_capture(scene):
@@ -129,21 +144,36 @@ def request_capture(scene):
 
 def _remove_empty():
     for key, session in tuple(_sessions.items()):
-        if session.sender is None and session.receiver is None:
+        if (session.sender is None and session.receiver is None
+                and session.draw_handle is None and session.engine._offscreen is None):
             del _sessions[key]
+
+
+def _stop_both(session):
+    errors = []
+    for kind in ("sender", "receiver"):
+        try:
+            session.stop(kind)
+        except Exception as error:
+            errors.append(str(error))
+    return errors
 
 
 def _tick():
     for session in tuple(_sessions.values()):
         if not session.valid():
-            session.stop("sender")
-            session.stop("receiver")
+            for error in _stop_both(session):
+                print(f"NOZZLE_LIVE_ERROR cleanup: {error}", flush=True)
             continue
         props = session.scene.nozzle_props
         if session.pending_error is not None:
             props.last_error = session.pending_error
             print(f"NOZZLE_LIVE_ERROR sender: {session.pending_error}", flush=True)
-            session.stop("sender")
+            try:
+                session.stop("sender")
+            except Exception as error:
+                props.last_error = f"sender cleanup: {error}"
+                print(f"NOZZLE_LIVE_ERROR {props.last_error}", flush=True)
             session.pending_error = None
         if session.receiver is not None:
             try:
@@ -154,7 +184,11 @@ def _tick():
             except Exception as error:
                 props.last_error = str(error)
                 print(f"NOZZLE_LIVE_ERROR receiver: {error}", flush=True)
-                session.stop("receiver")
+                try:
+                    session.stop("receiver")
+                except Exception as cleanup_error:
+                    props.last_error = f"receiver cleanup: {cleanup_error}"
+                    print(f"NOZZLE_LIVE_ERROR {props.last_error}", flush=True)
         session.area.tag_redraw()
     _remove_empty()
     return _interval if _sessions else None
@@ -164,10 +198,12 @@ def _tick():
 def shutdown(_unused=None):
     if bpy.app.timers.is_registered(_tick):
         bpy.app.timers.unregister(_tick)
+    errors = []
     for session in tuple(_sessions.values()):
-        session.stop("sender")
-        session.stop("receiver")
-    _sessions.clear()
+        errors.extend(_stop_both(session))
+    _remove_empty()
+    if errors:
+        raise RuntimeError("live cleanup: " + "; ".join(errors))
 
 
 def register():

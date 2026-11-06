@@ -14,7 +14,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 ADDON = "nozzle_blender"
-REQUIRED_PY = ["__init__.py", "engine.py", "operators.py", "panels.py", "properties.py"]
+REQUIRED_PY = ["__init__.py", "engine.py", "live.py", "operators.py", "panels.py", "properties.py"]
 
 
 def fail(message: str) -> None:

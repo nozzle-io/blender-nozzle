@@ -29,6 +29,7 @@ class LiveProbe:
         self.stopped_pixels = None
         self.pattern_offset = 0
         self.first_image_pointer = None
+        self.viewport_pixels = None
 
     def record(self, label, value):
         self.report["observations"].append({"label": label, "value": value})
@@ -91,7 +92,10 @@ class LiveProbe:
             props = bpy.context.scene.nozzle_props
             props.sender_name = f"blender-live-ui-{os.getpid()}"
             props.capture_width = 65
-            props.capture_height = 3
+            props.capture_height = 49
+            self.cube = bpy.data.objects.get("Cube")
+            if self.cube is None:
+                raise AssertionError("factory scene cube missing for viewport progression")
             try:
                 result = bpy.ops.nozzle.start_sender()
                 self.record("start_sender_result", sorted(result))
@@ -157,9 +161,11 @@ class LiveProbe:
                 if not self.peer.blender_peer_update(self.sender, self.pattern_offset):
                     raise AssertionError("independent native update failed")
                 self.phase = "updated"
+                self.cube.hide_viewport = True
                 self.started = time.perf_counter()
                 return 0.2
             if self.phase == "updated" and not self.failures:
+                self.cube.hide_viewport = False
                 self.stop_operators()
                 if session.draw_handle is not None or session.engine._offscreen is not None:
                     raise AssertionError("draw callback/offscreen remained after stop")
@@ -170,10 +176,6 @@ class LiveProbe:
         except Exception as error:
             traceback.print_exc()
             self.fail("observation", error)
-        try:
-            self.stop_operators()
-        except Exception as error:
-            self.fail("stop_operators", error)
         try:
             self.measure_conversion()
             self.measure_receive()
@@ -231,6 +233,16 @@ class LiveProbe:
                             result = self.native.frame_lock_pixels(frame)
                             if info["semantic_format"] != self.formats["RGBA32_FLOAT"] or result[3] != self.formats["RGBA32_FLOAT"]:
                                 raise AssertionError("viewport float32 was narrowed or misdeclared")
+                            import numpy as np
+                            if result[1:3] != (65, 49):
+                                raise AssertionError("viewport capture size mismatch")
+                            values = np.frombuffer(result[0], dtype=np.float32)
+                            if not np.isfinite(values).all() or np.ptp(values.reshape(-1, 4)[:, :3]) <= 1e-6:
+                                raise AssertionError("viewport capture is blank/nonfinite")
+                            if self.phase == "initial":
+                                self.viewport_pixels = result[0]
+                            elif self.phase == "updated" and result[0] == self.viewport_pixels:
+                                raise AssertionError("hiding the actual viewport cube did not change received pixels")
                             self.record("live_sender_frame", info)
                         finally:
                             self.native.receiver_release_frame(frame)
@@ -306,13 +318,14 @@ class LiveProbe:
 
     def check_unregister(self):
         with self.context():
-            bpy.ops.nozzle.start_sender()
-            bpy.ops.nozzle.start_receiver()
             props = bpy.context.scene.nozzle_props
             handles = {"sender": props.sender_handle, "receiver": props.receiver_handle}
             session = self.live._sessions[bpy.context.scene.as_pointer()]
+            if session.engine._offscreen is None or session.draw_handle is None:
+                raise AssertionError("unregister must exercise an allocated offscreen/draw callback")
             bpy.ops.preferences.addon_disable(module="nozzle_blender")
-            if self.live._sessions or bpy.app.timers.is_registered(self.live._tick) or session.draw_handle is not None:
+            if (self.live._sessions or bpy.app.timers.is_registered(self.live._tick)
+                    or session.draw_handle is not None or session.engine._offscreen is not None):
                 raise AssertionError("addon disable left a callback/session")
             for kind, handle in handles.items():
                 try:
