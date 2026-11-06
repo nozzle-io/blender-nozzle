@@ -32,7 +32,7 @@ class NOZZLE_OT_stop_sender(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.nozzle_props
-        if props.sender_handle < 0:
+        if not live.has_resources(context.scene, "sender"):
             return {"CANCELLED"}
 
         live.stop(context.scene, "sender")
@@ -115,7 +115,7 @@ class NOZZLE_OT_stop_receiver(bpy.types.Operator):
 
     def execute(self, context):
         props = context.scene.nozzle_props
-        if props.receiver_handle < 0:
+        if not live.has_resources(context.scene, "receiver"):
             return {"CANCELLED"}
 
         live.stop(context.scene, "receiver")

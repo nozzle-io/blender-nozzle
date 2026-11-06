@@ -56,9 +56,8 @@ class NozzleEngine:
 
     def _free_offscreen(self):
         if self._offscreen:
-            offscreen = self._offscreen
+            self._offscreen.free()
             self._offscreen = None
-            offscreen.free()
 
     def capture_and_send(self, context, sender_handle, width, height):
         self._ensure_offscreen(width, height)

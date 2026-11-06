@@ -101,6 +101,9 @@ def start(context, kind):
         _sessions[key] = session
     if getattr(session, kind) is not None:
         raise RuntimeError(f"{kind} is already running")
+    # A failed cleanup still owns its callback/offscreen; never overwrite it.
+    if kind == "sender" and (session.draw_handle is not None or session.engine._offscreen is not None):
+        session.stop("sender")
     props = context.scene.nozzle_props
     try:
         name = props.sender_name if kind == "sender" else props.receiver_target.strip()
@@ -142,6 +145,12 @@ def request_capture(scene):
     return True
 
 
+def has_resources(scene, kind):
+    session = _sessions.get(scene.as_pointer())
+    return session is not None and (getattr(session, kind) is not None or
+           (kind == "sender" and (session.draw_handle is not None or session.engine._offscreen is not None)))
+
+
 def _remove_empty():
     for key, session in tuple(_sessions.items()):
         if (session.sender is None and session.receiver is None
@@ -166,6 +175,12 @@ def _tick():
                 print(f"NOZZLE_LIVE_ERROR cleanup: {error}", flush=True)
             continue
         props = session.scene.nozzle_props
+        if session.sender is None and (session.draw_handle is not None or session.engine._offscreen is not None):
+            try:
+                session.stop("sender")
+            except Exception as error:
+                props.last_error = f"sender cleanup: {error}"
+                print(f"NOZZLE_LIVE_ERROR {props.last_error}", flush=True)
         if session.pending_error is not None:
             props.last_error = session.pending_error
             print(f"NOZZLE_LIVE_ERROR sender: {session.pending_error}", flush=True)
@@ -207,11 +222,26 @@ def shutdown(_unused=None):
 
 
 def register():
+    reset_state()
     if shutdown not in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.append(shutdown)
+    if reset_state not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(reset_state)
 
 
 def unregister():
     shutdown()
     if shutdown in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.remove(shutdown)
+    if reset_state in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(reset_state)
+
+
+@persistent
+def reset_state(_unused=None):
+    # Older .blend files may contain saved native IDs, which are not resources.
+    for scene in bpy.data.scenes:
+        props = scene.nozzle_props
+        props.sender_handle = props.receiver_handle = -1
+        props.is_sending = props.is_receiving = False
+        props.last_error = ""
