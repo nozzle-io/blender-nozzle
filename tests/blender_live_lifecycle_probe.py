@@ -163,10 +163,21 @@ class LifecycleProbe:
                 return 0.1
             if self.phase == "missing":
                 self.check("waiting_before_producer", self.receiving(), self.props.last_error)
+                self.operator("stop_receiver")
+                self.check("pending_receiver_cancellable", not self.live.has_resources(self.scene, "receiver")
+                           and not self.props.is_receiving and not bpy.app.timers.is_registered(self.live._tick))
+                self.publish(1)
+                return self.next("cancelled")
+            if self.phase == "cancelled":
+                self.check("cancelled_receiver_does_not_connect", self.session() is None
+                           and bpy.data.images.get("__nozzle_received__") is None)
+                self.end_producer()
+                self.operator("start_receiver")
                 self.publish(1)
                 return self.next("appeared")
             if self.phase == "appeared":
                 self.expect_pixels("late_producer_received", 1)
+                self.check("late_producer_clears_wait_status", self.props.last_error == "", self.props.last_error)
                 # Independent restart case even if the absent-producer case failed.
                 self.stop()
                 self.operator("start_receiver")
@@ -182,6 +193,7 @@ class LifecycleProbe:
                 return self.next("returned")
             if self.phase == "returned":
                 self.expect_pixels("restarted_producer_received", 2)
+                self.check("restarted_producer_clears_wait_status", self.props.last_error == "", self.props.last_error)
                 self.check("same_receiver_after_restart", self.props.receiver_handle == self.old_receiver)
                 self.stop()
                 self.operator("start_receiver")
@@ -209,6 +221,14 @@ class LifecycleProbe:
                                   and session.sent > self.old_sent)
                 sender_status = "sender" in self.props.last_error.lower()
                 self.check("sender_not_silently_stopped", progressed or sender_status, self.props.last_error)
+                self.old_sent = session.sent if session else 0
+                self.window.workspace = self.workspace
+                return self.next("workspace_restored")
+            if self.phase == "workspace_restored":
+                session = self.session()
+                self.check("sender_resumes_original_viewport", bool(session and session.sender is not None
+                           and self.props.is_sending and session.sent > self.old_sent), self.props.last_error)
+                self.check("restored_viewport_clears_pause_status", self.props.last_error == "", self.props.last_error)
                 self.stop()
                 for area in self.window.screen.areas:
                     if area.type == "VIEW_3D":

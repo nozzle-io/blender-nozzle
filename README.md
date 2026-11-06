@@ -76,11 +76,13 @@ Blender version/platform.
 3. Click **Start Sender**
 4. Other nozzle receivers can now connect using that name
 
-Keep the original 3D viewport open. Capture is requested at most every 50 ms,
-after the preceding capture completes, not at a guaranteed frame rate. Closing
-that viewport or switching its scene stops its live session. Both stop buttons,
+Capture is requested at most every 50 ms after the preceding capture completes,
+not at a guaranteed frame rate. If the original viewport is unavailable after a
+workspace/screen/scene change, sending pauses with a visible status and resumes
+when that viewport returns. Receiving continues independently of the viewport.
+Stop explicitly if the original viewport will not return. Both stop buttons,
 loading another file and disabling the addon release live callbacks/handles.
-Errors stop the affected direction and remain visible in the sidebar and in
+Fatal errors stop the affected direction and remain visible in the sidebar and in
 `NOZZLE_LIVE_ERROR` console output. Sender pixel format is RGBA32F, with no
 precision-reducing fallback; receiving applications must support it.
 
@@ -89,6 +91,14 @@ precision-reducing fallback; receiving applications must support it.
 1. Click **Refresh** to discover available senders
 2. Select a sender and click **Start Receiver**
 3. Received frames appear as `__nozzle_received__` image in Blender
+
+The receiver may also be started before its named sender exists. It keeps
+waiting until the producer appears and reconnects after the producer process
+exits and restarts. Stop Receiver cancels waiting as well as active reception.
+Missing/closed sender states clear when frames return; other errors remain fatal.
+The live receiver requires a scene, not a 3D viewport. Same-process destruction
+and recreation of a producer remains subject to core issue #184; this is not
+covered by the child-process restart guarantee.
 
 Live acquisition does not wait for a new frame (timeout=0); a timeout leaves the
 previous image unchanged. GPU synchronization and pixel mapping can still block;

@@ -45,7 +45,7 @@ class NOZZLE_PT_receiver(bpy.types.Panel):
             layout.label(text=props.last_error, icon="ERROR")
 
         if props.is_receiving:
-            layout.label(text=f"Connected to: {props.receiver_target}")
+            layout.label(text=f"Target: {props.receiver_target}")
             layout.operator("nozzle.receive_texture", text="Receive Single Frame")
             layout.operator("nozzle.stop_receiver", text="Stop Receiver", icon="X")
         else:

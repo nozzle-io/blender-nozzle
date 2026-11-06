@@ -19,6 +19,24 @@ The repaired probe requires:
   through the native publish function, observed by independent C API code.
 - The existing receive pixel matrix, including half/float precision, byte sRGB
   policy, image reuse, padding, orientation and rejection preserving old pixels.
+- A separate foreground lifecycle probe starts a receiver before a child-process
+  producer exists, cancels pending reception, receives after a late start, and
+  reconnects to a replacement producer PID without replacing the receiver handle.
+- Actual workspace switching preserves reception. Sending either progresses or
+  reports its pause; returning to the original viewport resumes capture. A
+  receiver also starts with no VIEW_3D areas in the current screen.
+
+The lifecycle cases failed against the unmodified implementation at
+`16929118ad935d63319a98489c8e76182e0b76c2` (11 assertions, exit 1):
+https://github.com/nozzle-io/blender-nozzle/actions/runs/42193344468/job/127810441240
+This is negative evidence, not a claim that the subsequent repair passes.
+
+## Development Release Note
+
+The repaired viewport sender publishes scene-linear RGBA32F instead of its former
+RGBA8 declaration. Receiving applications must support float32. The old live
+sender failed before producing frames, but the format change is still explicit;
+there is no precision-reducing fallback. This change is not an official release.
 
 The viewport test is not an exact render-color/orientation/HDR oracle. The
 synthetic native-publisher check bypasses viewport rendering/readback. Window

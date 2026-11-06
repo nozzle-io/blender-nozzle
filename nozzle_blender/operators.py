@@ -91,7 +91,7 @@ class NOZZLE_OT_start_receiver(bpy.types.Operator):
     def execute(self, context):
         live.reset_scene_state(context.scene)
         props = context.scene.nozzle_props
-        if props.receiver_handle >= 0:
+        if live.has_resources(context.scene, "receiver"):
             return {"CANCELLED"}
 
         target = props.receiver_target.strip()
