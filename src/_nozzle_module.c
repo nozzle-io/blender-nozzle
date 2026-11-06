@@ -2,6 +2,7 @@
 #include <Python.h>
 #include <string.h>
 #include "nozzle_module.h"
+#include "pixel_rows.h"
 
 static nozzle_handle_store g_handles = {0};
 
@@ -332,12 +333,22 @@ static PyObject *py_frame_get_info(PyObject *self, PyObject *args) {
         return check_error(err);
     }
 
-    return Py_BuildValue("{sK sK sI sI si sI}",
+    NozzleTextureFormat semantic_format = info.semantic_format;
+    if (semantic_format == NOZZLE_FORMAT_UNKNOWN) {
+        NozzleResolvedTextureFormat resolved = {0};
+        err = nozzle_frame_get_resolved_format(g_handles.frames[frame_handle], &resolved);
+        if (err != NOZZLE_OK) return check_error(err);
+        semantic_format = resolved.semantic_format;
+    }
+
+    return Py_BuildValue("{sK sK sI sI si si si sI}",
         "frame_index", info.frame_index,
         "timestamp_ns", info.timestamp_ns,
         "width", info.width,
         "height", info.height,
         "format", (int)info.format,
+        "semantic_format", (int)semantic_format,
+        "raw_semantic_format", (int)info.semantic_format,
         "dropped_frame_count", info.dropped_frame_count);
 }
 
@@ -352,28 +363,51 @@ static PyObject *py_frame_lock_pixels(PyObject *self, PyObject *args) {
         return NULL;
     }
 
+    NozzleResolvedTextureFormat resolved = {0};
+    NozzleFrame *frame = g_handles.frames[frame_handle];
+    NozzleErrorCode err = nozzle_frame_get_resolved_format(frame, &resolved);
+    if (err != NOZZLE_OK) return check_error(err);
+
     NozzleMappedPixels pixels = {0};
-    NozzleErrorCode err = nozzle_frame_lock_pixels_with_origin(
-        g_handles.frames[frame_handle], NOZZLE_ORIGIN_TOP_LEFT, &pixels);
+    NozzlePixelMapping *mapping = NULL;
+    err = nozzle_frame_lock_pixels_mapping_with_origin(
+        frame, NOZZLE_ORIGIN_TOP_LEFT, &mapping, &pixels);
     if (err != NOZZLE_OK) {
         return check_error(err);
     }
 
-    Py_ssize_t total = (Py_ssize_t)pixels.row_stride_bytes * pixels.height;
-    PyObject *bytes = PyBytes_FromStringAndSize((const char *)pixels.data, total);
-    if (!bytes) {
-        nozzle_frame_unlock_pixels(g_handles.frames[frame_handle]);
+    uint64_t row_bytes = (uint64_t)pixels.width * resolved.bytes_per_pixel;
+    if (!row_bytes || !pixels.height || resolved.storage_format != pixels.format ||
+        row_bytes > (uint64_t)PY_SSIZE_T_MAX / pixels.height ||
+        pixels.origin != NOZZLE_ORIGIN_TOP_LEFT) {
+        nozzle_pixel_mapping_unlock(&mapping);
+        PyErr_SetString(PyExc_ValueError, "invalid mapped pixel layout");
         return NULL;
     }
+    Py_ssize_t total = (Py_ssize_t)(row_bytes * pixels.height);
+    PyObject *bytes = PyBytes_FromStringAndSize(NULL, total);
+    if (!bytes) {
+        nozzle_pixel_mapping_unlock(&mapping);
+        return NULL;
+    }
+    if (!nozzle_blender_copy_rows(&pixels, (size_t)row_bytes, PyBytes_AS_STRING(bytes), (size_t)total)) {
+        Py_DECREF(bytes);
+        nozzle_pixel_mapping_unlock(&mapping);
+        PyErr_SetString(PyExc_ValueError, "invalid mapped pixel stride");
+        return NULL;
+    }
+    err = nozzle_pixel_mapping_unlock_checked(&mapping);
+    if (err != NOZZLE_OK) {
+        Py_DECREF(bytes);
+        return check_error(err);
+    }
 
-    nozzle_frame_unlock_pixels(g_handles.frames[frame_handle]);
-
-    return Py_BuildValue("(N I I i I)",
+    return Py_BuildValue("(N I I i n)",
         bytes,
         pixels.width,
         pixels.height,
         (int)pixels.format,
-        pixels.row_stride_bytes);
+        (Py_ssize_t)row_bytes);
 }
 
 static PyObject *py_frame_lock_writable_pixels(PyObject *self, PyObject *args) {

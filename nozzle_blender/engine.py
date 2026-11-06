@@ -1,5 +1,7 @@
 import bpy
 import gpu
+import struct
+from array import array
 from . import _nozzle_native
 
 FORMAT = _nozzle_native.get_format_constants()
@@ -7,6 +9,36 @@ GL = _nozzle_native.get_gl_constants()
 GL_TEXTURE_2D = GL["TEXTURE_2D"]
 
 NOZZLE_FORMAT_RGBA8_UNORM = FORMAT["RGBA8_UNORM"]
+
+
+def _image_pixels(result, semantic_format):
+    data, width, height, storage_format, stride = result
+    byte_formats = {FORMAT[key] for key in ("RGBA8_UNORM", "BGRA8_UNORM", "RGBA8_SRGB", "BGRA8_SRGB")}
+    if storage_format in byte_formats and semantic_format in byte_formats:
+        pixel = struct.Struct("=4B")
+    elif storage_format == semantic_format == FORMAT["RGBA16_FLOAT"]:
+        pixel = struct.Struct("=4e")
+    elif storage_format == semantic_format == FORMAT["RGBA32_FLOAT"]:
+        pixel = struct.Struct("=4f")
+    else:
+        raise ValueError(f"unsupported image format: storage={storage_format}, semantic={semantic_format}")
+    if width <= 0 or height <= 0 or stride < width * pixel.size or len(data) < (height-1)*stride + width*pixel.size:
+        raise ValueError("invalid owned pixel layout")
+    bgra = storage_format in {FORMAT["BGRA8_UNORM"], FORMAT["BGRA8_SRGB"]}
+    values = array("f")
+    # Native copy is top-down; Blender Image.pixels is bottom-up RGBA float.
+    for y in range(height-1, -1, -1):
+        for x in range(width):
+            rgba = pixel.unpack_from(data, y*stride + x*pixel.size)
+            if storage_format in byte_formats:
+                rgba = [value / 255.0 for value in rgba]
+                if bgra:
+                    rgba[0], rgba[2] = rgba[2], rgba[0]
+                # This image receiver assumes untagged byte color is encoded
+                # sRGB too. Float input is already scene linear.
+                rgba[:3] = [v/12.92 if v <= 0.04045 else ((v+0.055)/1.055)**2.4 for v in rgba[:3]]
+            values.extend(rgba)
+    return values
 
 
 class NozzleEngine:
@@ -68,24 +100,35 @@ class NozzleEngine:
             if result is None:
                 return False
 
-            pixel_bytes, _, _, fmt, _ = result
+            if result[1:3] != (w, h):
+                raise ValueError("mapped and frame dimensions disagree")
+            values = _image_pixels(result, info["semantic_format"])
 
             image_name = self._receive_image_name
-            if image_name in bpy.data.images:
-                image = bpy.data.images[image_name]
-                if image.size[0] != w or image.size[1] != h:
+            previous = bpy.data.images.get(image_name)
+            reference = bpy.data.images.new("__nozzle_float_role__", width=1, height=1, float_buffer=True)
+            try:
+                default_float_space = reference.colorspace_settings.name
+            finally:
+                bpy.data.images.remove(reference)
+            replace = (previous is None or tuple(previous.size) != (w, h) or not previous.is_float
+                       or previous.colorspace_settings.name != default_float_space)
+            image = bpy.data.images.new(image_name, width=w, height=h, alpha=True, float_buffer=True) if replace else previous
+            try:
+                image.alpha_mode = "STRAIGHT"
+                # Keep Blender's default float role. Tagging color as data would
+                # bypass display color management as well as input conversion.
+                image.pixels.foreach_set(values)
+                image.update()
+            except Exception:
+                if replace:
                     bpy.data.images.remove(image)
-                    image = None
-            else:
-                image = None
-
-            if image is None:
-                image = bpy.data.images.new(image_name, width=w, height=h)
-
-            image.pixels = list(pixel_bytes)
-            image.pack()
+                raise
+            if replace:
+                if previous is not None:
+                    previous.user_remap(image)
+                    bpy.data.images.remove(previous)
+                image.name = image_name
             return True
         finally:
             _nozzle_native.receiver_release_frame(frame_handle)
-
-        return False
