@@ -42,6 +42,7 @@ extern "C" void *blender_peer_publish(const char *name, int width, int height,
         return nullptr;
     }
     auto requested = static_cast<NozzleTextureFormat>(format);
+    const bool monochrome = requested == NOZZLE_FORMAT_R8_UNORM;
     if(!ok(nozzle_sender_acquire_writable_frame(peer.sender, width, height, requested, &peer.frame), "acquire")) return nullptr;
     NozzleMappedPixels pixels{};
     if(!ok(nozzle_frame_lock_writable_pixels_mapping_with_origin(peer.frame,
@@ -52,7 +53,8 @@ extern "C" void *blender_peer_publish(const char *name, int width, int height,
     if(requested == NOZZLE_FORMAT_RGBA32_FLOAT) component_bytes = 4;
     const bool bgra = pixels.format == NOZZLE_FORMAT_BGRA8_UNORM || pixels.format == NOZZLE_FORMAT_BGRA8_SRGB;
     if(!pixels.data || pixels.width != (uint32_t)width || pixels.height != (uint32_t)height ||
-       (component_bytes == 1 && !bgra) || (component_bytes != 1 && pixels.format != requested)) {
+       (monochrome ? pixels.format != requested :
+        ((component_bytes == 1 && !bgra) || (component_bytes != 1 && pixels.format != requested)))) {
         std::fprintf(stderr, "unexpected native storage requested=%d actual=%d\n", format, (int)pixels.format);
         return nullptr;
     }
@@ -62,6 +64,10 @@ extern "C" void *blender_peer_publish(const char *name, int width, int height,
         const int y = bottom_up ? height - 1 - row_index : row_index;
         auto *row = static_cast<uint8_t *>(pixels.data) + row_index * pixels.row_stride_bytes;
         for(int x = 0; x < width; ++x) {
+            if(monochrome) {
+                row[x] = (uint8_t)(40+y);
+                continue;
+            }
             const uint8_t bytes[] = {(uint8_t)(190+y), (uint8_t)(20+x%193), (uint8_t)(40+y), (uint8_t)(149+x%73)};
             const uint16_t halves[] = {0x3c01, 0xb801, 0x4001, 0x3801};
             const uint32_t floats[] = {0x3f800001, 0xbf000001, 0x40000001, 0x3f000001};

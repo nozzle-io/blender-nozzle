@@ -23,6 +23,31 @@ def expected_pixel(kind, x, y):
     return values
 
 
+def check_cpu_contract(formats):
+    from nozzle_blender.engine import _image_pixels
+    for order in ("RGBA8_UNORM", "BGRA8_UNORM"):
+        # Low and high sRGB branches, alpha linear, nonzero row padding.
+        rgba = (3, 100, 203, 149)
+        storage = bytes(rgba if order.startswith("RGBA") else (203, 100, 3, 149))
+        data = storage + b"padding!"
+        result = (data, 1, 1, formats[order], 12)
+        actual = _image_pixels(result, formats["RGBA8_SRGB"])
+        expected = [v/255/12.92 if v <= 10 else ((v/255+0.055)/1.055)**2.4 for v in rgba[:3]] + [149/255]
+        if any(not math.isfinite(a) or abs(a-e) > 1e-6 for a, e in zip(actual, expected)):
+            raise AssertionError(f"synthetic sRGB/alpha mismatch {order}: {actual}")
+    bad = [(b"", 1, 1, formats["RGBA8_UNORM"], 4),
+           (b"abcd", 1, 1, formats["RGBA8_UNORM"], 3),
+           (b"abcd", 0, 1, formats["RGBA8_UNORM"], 4)]
+    for result in bad:
+        try:
+            _image_pixels(result, formats["RGBA8_UNORM"])
+        except ValueError:
+            pass
+        else:
+            raise AssertionError("malformed image layout was accepted")
+    print("BLENDER_CPU_CONTRACT PASS sRGB/alpha/padding/invalid-layout (synthetic, not native sRGB)", flush=True)
+
+
 def main():
     zip_path, peer_path = sys.argv[sys.argv.index("--")+1:]
     bpy.ops.preferences.addon_install(filepath=str(Path(zip_path).resolve()), overwrite=True)
@@ -83,6 +108,32 @@ def main():
             if receiver is not None:
                 native.destroy_receiver(receiver)
             peer.blender_peer_destroy(sender)
+    # Unsupported native input must preserve the previously received image.
+    previous = bpy.data.images[engine._receive_image_name]
+    previous_pixels = list(previous.pixels)
+    name = f"blender-unsupported-{os.getpid()}"
+    sender = peer.blender_peer_publish(name.encode(), 65, 3, formats["R8_UNORM"], 0)
+    if not sender:
+        raise RuntimeError("native R8 setup failed; no SKIP")
+    receiver = None
+    total += 1
+    try:
+        receiver = native.create_receiver(name)
+        try:
+            engine.receive_to_image(bpy.context, receiver)
+        except ValueError as error:
+            if "unsupported image format" not in str(error):
+                raise
+        else:
+            raise AssertionError("unsupported native R8 was accepted")
+        if bpy.data.images[engine._receive_image_name] != previous or list(previous.pixels) != previous_pixels:
+            raise AssertionError("unsupported format changed previous image")
+        print("BLENDER_IMAGE_PASS unsupported-native-R8 preserves previous image", flush=True)
+    finally:
+        if receiver is not None:
+            native.destroy_receiver(receiver)
+        peer.blender_peer_destroy(sender)
+    check_cpu_contract(formats)
     print(f"BLENDER_IMAGE_PEER failed={failed} total={total}", flush=True)
     if failed:
         raise RuntimeError("Blender native-peer image mismatch")
