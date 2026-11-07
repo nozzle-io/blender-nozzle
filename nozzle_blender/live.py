@@ -10,6 +10,7 @@ from .engine import NozzleEngine
 _sessions = {}
 _interval = 0.05
 _unavailable = {"sender_not_found", "sender_closed"}
+_timeout_code = getattr(native, "ERROR_TIMEOUT", None)
 
 
 class Session:
@@ -102,6 +103,10 @@ class Session:
             self.engine.capture_and_send(bpy.context, self.sender, props.capture_width, props.capture_height)
             self.sent += 1
             self.send_seconds = time.perf_counter() - start
+        except RuntimeError as error:
+            # Older native modules without structured codes retain fatal handling.
+            if _timeout_code is None or getattr(error, "code", None) != _timeout_code:
+                self.pending_error = str(error)
         except Exception as error:
             # Remove/free drawing resources in the next timer, not inside their callback.
             self.pending_error = str(error)

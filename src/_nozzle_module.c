@@ -93,7 +93,17 @@ static PyObject *check_error(NozzleErrorCode code) {
     if (code == NOZZLE_OK) {
         Py_RETURN_NONE;
     }
-    PyErr_SetString(PyExc_RuntimeError, error_code_str(code));
+    PyObject *error = PyObject_CallFunction(PyExc_RuntimeError, "s", error_code_str(code));
+    if (!error) return NULL;
+    PyObject *error_code = PyLong_FromLong((long)code);
+    if (!error_code || PyObject_SetAttrString(error, "code", error_code) < 0) {
+        Py_XDECREF(error_code);
+        Py_DECREF(error);
+        return NULL;
+    }
+    Py_DECREF(error_code);
+    PyErr_SetObject(PyExc_RuntimeError, error);
+    Py_DECREF(error);
     return NULL;
 }
 
@@ -241,8 +251,7 @@ static PyObject *py_create_receiver(PyObject *self, PyObject *args, PyObject *kw
     NozzleReceiver *receiver = NULL;
     NozzleErrorCode err = nozzle_receiver_create(&desc, &receiver);
     if (err != NOZZLE_OK) {
-        PyErr_SetString(PyExc_RuntimeError, error_code_str(err));
-        return NULL;
+        return check_error(err);
     }
 
     int h = alloc_receiver_handle(receiver);
@@ -680,5 +689,11 @@ static struct PyModuleDef nozzle_module = {
 
 PyMODINIT_FUNC PyInit__nozzle_native(void) {
     memset(&g_handles, 0, sizeof(g_handles));
-    return PyModule_Create(&nozzle_module);
+    PyObject *module = PyModule_Create(&nozzle_module);
+    if (!module) return NULL;
+    if (PyModule_AddIntConstant(module, "ERROR_TIMEOUT", NOZZLE_ERROR_TIMEOUT) < 0) {
+        Py_DECREF(module);
+        return NULL;
+    }
+    return module;
 }
