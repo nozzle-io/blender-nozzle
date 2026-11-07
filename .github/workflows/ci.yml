@@ -58,7 +58,8 @@ jobs:
             scripts/publish_release_assets.py
           python3 -m unittest -v \
             tests/test_publish_release_assets.py \
-            tests/test_native_frame_ownership.py
+            tests/test_native_frame_ownership.py \
+            tests/test_live_sender_lifecycle.py
 
   build-macos:
     runs-on: macos-15
