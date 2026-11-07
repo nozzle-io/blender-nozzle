@@ -251,8 +251,7 @@ static PyObject *py_create_receiver(PyObject *self, PyObject *args, PyObject *kw
     NozzleReceiver *receiver = NULL;
     NozzleErrorCode err = nozzle_receiver_create(&desc, &receiver);
     if (err != NOZZLE_OK) {
-        PyErr_SetString(PyExc_RuntimeError, error_code_str(err));
-        return NULL;
+        return check_error(err);
     }
 
     int h = alloc_receiver_handle(receiver);

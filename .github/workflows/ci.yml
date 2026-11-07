@@ -78,6 +78,9 @@ jobs:
       - name: Build
         run: cmake --build build
 
+      - name: Native exception metadata contract (no GPU)
+        run: python tests/native_error_contract.py build
+
   build-windows:
     runs-on: windows-2022
     steps:
@@ -94,6 +97,9 @@ jobs:
 
       - name: Build
         run: cmake --build build --config Release
+
+      - name: Native exception metadata contract (no GPU)
+        run: python tests/native_error_contract.py build
 
   build-linux:
     runs-on: ubuntu-22.04
@@ -114,6 +120,9 @@ jobs:
 
       - name: Build
         run: cmake --build build
+
+      - name: Native exception metadata contract (no GPU)
+        run: python tests/native_error_contract.py build
 
   package-linux-blender-smoke:
     runs-on: ubuntu-22.04
