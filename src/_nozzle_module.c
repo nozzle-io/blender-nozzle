@@ -355,8 +355,8 @@ static PyObject *py_frame_get_info(PyObject *self, PyObject *args) {
     }
 
     return Py_BuildValue("{sK sK sI sI si si si sI}",
-        "frame_index", info.frame_index,
-        "timestamp_ns", info.timestamp_ns,
+        "frame_index", (unsigned long long)info.frame_index,
+        "timestamp_ns", (unsigned long long)info.timestamp_ns,
         "width", info.width,
         "height", info.height,
         "format", (int)info.format,
@@ -455,12 +455,12 @@ static PyObject *py_frame_lock_writable_pixels(PyObject *self, PyObject *args) {
         return check_error(err);
     }
 
-    return Py_BuildValue("(N I I i I)",
+    return Py_BuildValue("(N I I i L)",
         bytes,
         pixels.width,
         pixels.height,
         (int)pixels.format,
-        pixels.row_stride_bytes);
+        (long long)pixels.row_stride_bytes);
 }
 
 static PyObject *py_frame_copy_to_gl_texture(PyObject *self, PyObject *args) {
@@ -502,15 +502,23 @@ static PyObject *py_enumerate_senders(PyObject *self, PyObject *args) {
 
     for (uint32_t i = 0; i < arr.count; i++) {
         NozzleSenderInfo *info = &arr.items[i];
-        PyObject *dict = Py_BuildValue("{s s s s s i}",
+        PyObject *dict = Py_BuildValue("{ss ss ss si}",
             "name", info->name ? info->name : "",
             "application_name", info->application_name ? info->application_name : "",
             "id", info->id ? info->id : "",
             "backend", (int)info->backend);
-        if (dict) {
-            PyList_Append(list, dict);
-            Py_DECREF(dict);
+        if (!dict) {
+            nozzle_free_sender_info_array(&arr);
+            Py_DECREF(list);
+            return NULL;
         }
+        if (PyList_Append(list, dict) < 0) {
+            Py_DECREF(dict);
+            nozzle_free_sender_info_array(&arr);
+            Py_DECREF(list);
+            return NULL;
+        }
+        Py_DECREF(dict);
     }
 
     nozzle_free_sender_info_array(&arr);
@@ -534,17 +542,17 @@ static PyObject *py_receiver_get_connected_info(PyObject *self, PyObject *args) 
         return check_error(err);
     }
 
-    return Py_BuildValue("{s s s s s I s I s I si sK sK sd}",
+    return Py_BuildValue("{ss ss ss si sI sI si sd sK sK}",
         "name", info.name ? info.name : "",
         "application_name", info.application_name ? info.application_name : "",
         "id", info.id ? info.id : "",
         "backend", (int)info.backend,
-        "width", info.width,
-        "height", info.height,
+        "width", (unsigned int)info.width,
+        "height", (unsigned int)info.height,
         "format", (int)info.format,
         "estimated_fps", info.estimated_fps,
-        "frame_counter", info.frame_counter,
-        "last_update_time_ns", info.last_update_time_ns);
+        "frame_counter", (unsigned long long)info.frame_counter,
+        "last_update_time_ns", (unsigned long long)info.last_update_time_ns);
 }
 
 // --- Format constants ---
@@ -552,7 +560,9 @@ static PyObject *py_receiver_get_connected_info(PyObject *self, PyObject *args) 
 static PyObject *py_get_format_constants(PyObject *self, PyObject *args) {
     (void)self;
     (void)args;
-    return Py_BuildValue("{s i s i s i s i s i s i s i s i s i s i s i s i s i s i s i s i s i}",
+    return Py_BuildValue("{si si si si si si si "
+                        "si si si si si si "
+                        "si si si si si si}",
         "UNKNOWN", (int)NOZZLE_FORMAT_UNKNOWN,
         "R8_UNORM", (int)NOZZLE_FORMAT_R8_UNORM,
         "RG8_UNORM", (int)NOZZLE_FORMAT_RG8_UNORM,
