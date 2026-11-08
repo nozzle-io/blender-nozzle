@@ -157,7 +157,7 @@ struct external_peer {
 };
 }
 
-extern "C" void *blender_peer_publish_external(const char *name) {
+extern "C" void *blender_peer_publish_external(const char *name, int legacy_unknown) {
     std::unique_ptr<external_peer> peer(new (std::nothrow) external_peer);
     if(!peer) return nullptr;
     nozzle::sender_desc desc;
@@ -168,6 +168,14 @@ extern "C" void *blender_peer_publish_external(const char *name) {
     auto frame = peer->sender.acquire_writable_frame({65, 3, nozzle::texture_format::bgra8_unorm});
     if(!frame.ok()) return nullptr;
     peer->frame = std::move(frame.value());
+    auto &texture = peer->frame.get_texture();
+    if(texture.desc().semantic_format != nozzle::texture_format::bgra8_unorm ||
+       texture.resolved().semantic_format != nozzle::texture_format::bgra8_unorm) return nullptr;
+    if(legacy_unknown) {
+        // Test-only emulation of the old descriptor defect, not an old binary
+        // or a claim about current publication. The texture itself is mutable.
+        const_cast<nozzle::texture_desc &>(texture.desc()).semantic_format = nozzle::texture_format::unknown;
+    }
     auto mapping = nozzle::lock_writable_pixels_mapping_with_origin(peer->frame, nozzle::texture_origin::top_left);
     if(!mapping.ok()) return nullptr;
     const auto &pixels = mapping.value().pixels();
@@ -195,9 +203,10 @@ extern "C" void *blender_peer_publish_external(const char *name) {
        !ok(nozzle_receiver_acquire_frame(observer.receiver, &acquire, &observer.frame), "external observer acquire") ||
        !ok(nozzle_frame_get_info(observer.frame, &raw), "external raw info") ||
        !ok(nozzle_frame_get_resolved_format(observer.frame, &resolved), "external resolved info")) return nullptr;
-    std::printf("BLENDER_EXTERNAL raw_semantic=%d resolved_semantic=%d storage=%d\n",
-                (int)raw.semantic_format, (int)resolved.semantic_format, (int)resolved.storage_format);
-    if(raw.semantic_format != NOZZLE_FORMAT_UNKNOWN ||
+    std::printf("BLENDER_EXTERNAL legacy_descriptor_emulated=%d raw_semantic=%d resolved_semantic=%d storage=%d\n",
+                legacy_unknown, (int)raw.semantic_format, (int)resolved.semantic_format, (int)resolved.storage_format);
+    const auto expected_raw = legacy_unknown ? NOZZLE_FORMAT_UNKNOWN : NOZZLE_FORMAT_BGRA8_UNORM;
+    if(raw.semantic_format != expected_raw || raw.format != NOZZLE_FORMAT_BGRA8_UNORM ||
        resolved.semantic_format != NOZZLE_FORMAT_BGRA8_UNORM ||
        resolved.storage_format != NOZZLE_FORMAT_BGRA8_UNORM) return nullptr;
     return peer.release();

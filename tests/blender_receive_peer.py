@@ -60,7 +60,7 @@ def main():
     peer.blender_peer_publish.restype = ctypes.c_void_p
     peer.blender_peer_destroy.argtypes = [ctypes.c_void_p]
     peer.blender_peer_destroy.restype = None
-    peer.blender_peer_publish_external.argtypes = [ctypes.c_char_p]
+    peer.blender_peer_publish_external.argtypes = [ctypes.c_char_p, ctypes.c_int]
     peer.blender_peer_publish_external.restype = ctypes.c_void_p
     peer.blender_peer_destroy_external.argtypes = [ctypes.c_void_p]
     peer.blender_peer_destroy_external.restype = None
@@ -126,31 +126,49 @@ def main():
             if receiver is not None:
                 native.destroy_receiver(receiver)
             peer.blender_peer_destroy(sender)
-    # Public external-texture publication has unknown raw semantics but a valid
-    # resolved format in the pinned core. The native observer asserts that fact.
-    name = f"blender-external-{os.getpid()}"
-    sender = peer.blender_peer_publish_external(name.encode())
-    if not sender:
-        raise RuntimeError("native external publication setup failed; no SKIP")
-    receiver = None
-    total += 1
-    try:
-        receiver = native.create_receiver(name)
-        if not engine.receive_to_image(bpy.context, receiver):
-            raise AssertionError("external receive returned false")
-        image = bpy.data.images[engine._receive_image_name]
-        if (not image.is_float or image.colorspace_settings.is_data
-                or image.colorspace_settings.name != default_float_space or image_node.image != image):
-            raise AssertionError("external receive image contract/user mismatch")
-        expected = [v for row in range(3) for x in range(65) for v in expected_pixel("BGRA8_UNORM", x, 2-row)]
-        actual = list(image.pixels)
-        if len(actual) != len(expected) or any(not math.isfinite(a) or abs(a-e) > 1e-6 for a, e in zip(actual, expected)):
-            raise AssertionError("external receive pixels mismatch")
-        print("BLENDER_IMAGE_PASS external native texture with unknown raw semantics", flush=True)
-    finally:
-        if receiver is not None:
+    # Current publication is BGRA throughout. A separate test-only descriptor
+    # override emulates legacy UNKNOWN; neither mode changes production code.
+    for legacy_unknown in (0, 1):
+        label = "emulated legacy UNKNOWN descriptor" if legacy_unknown else "current native BGRA semantics"
+        name = f"blender-external-{os.getpid()}-{legacy_unknown}"
+        sender = peer.blender_peer_publish_external(name.encode(), legacy_unknown)
+        if not sender:
+            raise RuntimeError(f"native external publication setup failed: {label}; no SKIP")
+        receiver = None
+        total += 1
+        try:
+            receiver = native.create_receiver(name)
+            frame = native.receiver_acquire_frame(receiver, 1000)
+            if frame is None:
+                raise AssertionError(f"external metadata acquire timed out: {label}")
+            try:
+                info = native.frame_get_info(frame)
+                expected_raw = formats["UNKNOWN"] if legacy_unknown else formats["BGRA8_UNORM"]
+                if (info["raw_semantic_format"] != expected_raw
+                        or info["semantic_format"] != formats["BGRA8_UNORM"]
+                        or info["format"] != formats["BGRA8_UNORM"]):
+                    raise AssertionError(f"production C extension semantic contract: {label}: {info}")
+            finally:
+                native.receiver_release_frame(frame)
             native.destroy_receiver(receiver)
-        peer.blender_peer_destroy_external(sender)
+            receiver = None
+            # A fresh receiver can acquire the same publication for the image path.
+            receiver = native.create_receiver(name)
+            if not engine.receive_to_image(bpy.context, receiver):
+                raise AssertionError("external receive returned false")
+            image = bpy.data.images[engine._receive_image_name]
+            if (not image.is_float or image.colorspace_settings.is_data
+                    or image.colorspace_settings.name != default_float_space or image_node.image != image):
+                raise AssertionError("external receive image contract/user mismatch")
+            expected = [v for row in range(3) for x in range(65) for v in expected_pixel("BGRA8_UNORM", x, 2-row)]
+            actual = list(image.pixels)
+            if len(actual) != len(expected) or any(not math.isfinite(a) or abs(a-e) > 1e-6 for a, e in zip(actual, expected)):
+                raise AssertionError("external receive pixels mismatch")
+            print(f"BLENDER_IMAGE_PASS external {label}; production C extension and image pixels", flush=True)
+        finally:
+            if receiver is not None:
+                native.destroy_receiver(receiver)
+            peer.blender_peer_destroy_external(sender)
 
     # Same-size color frames must update the existing float image, not replace it.
     for kind in ("RGBA32_FLOAT", "RGBA8_UNORM"):

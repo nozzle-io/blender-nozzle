@@ -32,9 +32,17 @@ native padding. `tests/pixel_rows.c` supplements the native test with synthetic
 negative source stride, padding, capacity and overflow checks.
 `frame_get_info` exposes effective `semantic_format` and `raw_semantic_format`;
 only an unknown raw semantic format falls back to core's resolved semantics.
-An independent public C++ external-texture producer exercises this condition,
-and a native C API observer proves raw UNKNOWN versus resolved BGRA8 before
-Blender receives it. No shared metadata is patched by the test.
+The current-core public C++ external-texture producer must report raw BGRA8 and
+resolved BGRA8 to an independent native C API observer before Blender receives
+it. A separate compatibility mode overrides only its test-owned texture
+descriptor's semantic field to UNKNOWN before external publication, emulating
+the old descriptor defect. This is not an old-binary test or a claim that the
+current sender naturally produces UNKNOWN. No shared-memory fields or production
+fallback code are patched. Both modes exercise the packaged C extension's actual
+`frame_get_info`: raw semantics remain observable, while effective semantics are
+BGRA8. Fresh receivers then exercise production `receive_to_image` and compare
+every pixel, including alpha. These are macOS native-peer compatibility checks,
+not Python-stub normalization tests.
 
 The image helper accepts RGBA8/BGRA8 UNORM or sRGB, RGBA16_FLOAT and
 RGBA32_FLOAT. Channel order comes from the mapping; semantic metadata must be
