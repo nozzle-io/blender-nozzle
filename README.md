@@ -36,6 +36,17 @@ renderer itself preserves arbitrary HDR values. See [live evidence](docs/live-pr
 - CMake 3.20+
 - C++17 compiler
 
+## Native Metadata
+
+The native `receiver_get_connected_info` function copies an owned C snapshot into
+the existing Python dictionary schema and types. Metadata is last-known state,
+not a connection predicate or fresh liveness check. Returned strings and values
+survive later calls and handle closure; this does not add concurrent handle
+destruction safety. The existing macOS native metadata contract checks this
+ownership using the built extension and real Metal peer, including UTF-8 names.
+It is separate from Blender UI/pixel validation and does not establish runtime
+receiver behavior on Windows or Linux.
+
 ## Building
 
 The native extension wraps the nozzle C ABI into a Python module.

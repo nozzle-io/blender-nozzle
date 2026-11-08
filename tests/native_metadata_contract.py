@@ -87,7 +87,7 @@ def run_case(build_dir, peer_path, case):
         ctypes.c_void_p, ctypes.POINTER(SenderSnapshot)]
     peer.nozzle_sender_get_info_snapshot.restype = ctypes.c_int
 
-    name = f"metadata-265-{case}-{os.getpid()}"
+    name = f"metadata-265-{case}-{os.getpid()}-\u65e5\u672c\U0001f680"
     bgra = 5  # NOZZLE_FORMAT_BGRA8_UNORM; independent of the constants regression.
     sender = peer.blender_peer_publish(name.encode(), 65, 3, bgra, 0)
     if not sender:
@@ -122,6 +122,15 @@ def run_case(build_dir, peer_path, case):
             print("CALL receiver_get_connected_info", flush=True)
             info = native.receiver_get_connected_info(receiver)
             print(f"RETURN receiver_get_connected_info {info!r}", flush=True)
+            check.assertEqual(native.receiver_get_connected_info(receiver), info)
+            native.receiver_release_frame(frame)
+            frame = None
+            native.destroy_receiver(receiver)
+            receiver = None
+            peer.blender_peer_destroy(sender)
+            sender = None
+            # All checks below read the original owned Python result, not handles.
+            print("NATIVE_METADATA connected owned_UTF8_after_close", flush=True)
             check.assertEqual(set(info), set(identity) | {
                 "width", "height", "format", "estimated_fps",
                 "frame_counter", "last_update_time_ns"})
@@ -141,7 +150,8 @@ def run_case(build_dir, peer_path, case):
             native.receiver_release_frame(frame)
         if receiver is not None:
             native.destroy_receiver(receiver)
-        peer.blender_peer_destroy(sender)
+        if sender is not None:
+            peer.blender_peer_destroy(sender)
 
 
 def main():
