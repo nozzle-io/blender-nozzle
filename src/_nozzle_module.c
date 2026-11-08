@@ -535,17 +535,17 @@ static PyObject *py_receiver_get_connected_info(PyObject *self, PyObject *args) 
         return NULL;
     }
 
-    NozzleConnectedSenderInfo info = {0};
-    NozzleErrorCode err = nozzle_receiver_get_connected_info(
+    NozzleConnectedSenderSnapshot info = {0};
+    NozzleErrorCode err = nozzle_receiver_get_connected_info_snapshot(
         g_handles.receivers[handle], &info);
     if (err != NOZZLE_OK) {
         return check_error(err);
     }
 
     return Py_BuildValue("{ss ss ss si sI sI si sd sK sK}",
-        "name", info.name ? info.name : "",
-        "application_name", info.application_name ? info.application_name : "",
-        "id", info.id ? info.id : "",
+        "name", info.name,
+        "application_name", info.application_name,
+        "id", info.id,
         "backend", (int)info.backend,
         "width", (unsigned int)info.width,
         "height", (unsigned int)info.height,
