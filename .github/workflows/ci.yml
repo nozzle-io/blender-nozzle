@@ -312,6 +312,10 @@ jobs:
       - name: Build native addon module
         run: cmake --build build-blender --config Release --verbose
 
+      - name: Native metadata serializers (isolated real Metal publisher cases)
+        timeout-minutes: 3
+        run: python3 tests/native_metadata_contract.py build-blender build-blender/libblender_pixel_peer.dylib
+
       - name: Resolve release channel
         run: |
           set -euo pipefail
