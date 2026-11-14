@@ -83,9 +83,9 @@ def run_case(build_dir, peer_path, case):
     peer.blender_peer_publish.restype = ctypes.c_void_p
     peer.blender_peer_destroy.argtypes = [ctypes.c_void_p]
     peer.blender_peer_destroy.restype = None
-    peer.nozzle_sender_get_info_snapshot.argtypes = [
+    peer.blender_peer_get_info_snapshot.argtypes = [
         ctypes.c_void_p, ctypes.POINTER(SenderSnapshot)]
-    peer.nozzle_sender_get_info_snapshot.restype = ctypes.c_int
+    peer.blender_peer_get_info_snapshot.restype = ctypes.c_int
 
     name = f"metadata-265-{case}-{os.getpid()}-\u65e5\u672c\U0001f680"
     bgra = 5  # NOZZLE_FORMAT_BGRA8_UNORM; independent of the constants regression.
@@ -95,7 +95,7 @@ def run_case(build_dir, peer_path, case):
     receiver = frame = None
     try:
         snapshot = SenderSnapshot()
-        check.assertEqual(peer.nozzle_sender_get_info_snapshot(
+        check.assertEqual(peer.blender_peer_get_info_snapshot(
             sender, ctypes.byref(snapshot)), 0)
         identity = {"name": name, "application_name": "Blender native peer",
                     "id": snapshot.id.decode("ascii"), "backend": 2}

@@ -102,6 +102,10 @@ extern "C" void blender_peer_destroy(void *sender) {
     nozzle_sender_destroy(static_cast<NozzleSender *>(sender));
 }
 
+extern "C" NozzleErrorCode blender_peer_get_info_snapshot(void *sender, NozzleSenderInfoSnapshot *info) {
+    return nozzle_sender_get_info_snapshot(static_cast<NozzleSender *>(sender), info);
+}
+
 extern "C" bool blender_peer_update(void *sender, int offset) {
     resources peer;
     peer.sender = static_cast<NozzleSender *>(sender);
